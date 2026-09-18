@@ -44,15 +44,20 @@ A continuous Behavioural Index is used as a directional score in the complete fo
 
 ```text
 .
-├── data/
-│   ├── raw/
-│   │   └── Resultados_revisados_AP.xlsx
+├── 01_Data/
+│   ├── Raw/
+│   │   └── Resultados revisados AP.xlsx
+│   ├── Processed/             # Generated analytical datasets
 │   ├── DATA_DICTIONARY.md
 │   └── README.md
-├── R/                         # Curated R workflows
-├── spss/                     # Two-Step syntax and exchange files
-├── outputs/                  # Recreated tables, figures and intermediate objects
-├── renv.lock                 # Package versions, when finalised
+├── 02_R/
+│   ├── 00_Setup/
+│   ├── 01_Objective1_ControlArchitecture/
+│   ├── 02_Objective2_PopulationReorganization/
+│   ├── 03_Objective3_StressPhenotypes/
+│   └── 04_Objective4_OperationalDefinitionsOfBehaviouralResilience/
+├── 03_Results/                # Recreated tables, figures and objects
+├── 07_Environment/            # Computational environment records
 ├── .gitignore
 └── README.md
 ```
@@ -61,11 +66,11 @@ The analytical scripts are being curated against the current manuscript so that 
 
 ## Data integrity
 
-The spreadsheet in `data/raw/` is the unchanged primary behavioural dataset used for the retrospective analyses. Derived datasets, classifications and graphical outputs should be recreated by the scripted workflow and are not treated as independent source data.
+The spreadsheet in `01_Data/Raw/` is the unchanged primary behavioural dataset used for the retrospective analyses. Derived datasets, classifications and graphical outputs should be recreated by the scripted workflow and are not treated as independent source data.
 
 The spreadsheet uses the label `Stress` for the UCS-exposed group. Cohort provenance is retained in the `Author` column.
 
-See [data/README.md](data/README.md) and [data/DATA_DICTIONARY.md](data/DATA_DICTIONARY.md) for details.
+See [01_Data/README.md](01_Data/README.md) and [01_Data/DATA_DICTIONARY.md](01_Data/DATA_DICTIONARY.md) for details.
 
 ## Computational environment
 
