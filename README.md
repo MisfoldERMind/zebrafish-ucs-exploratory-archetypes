@@ -55,14 +55,14 @@ A continuous Behavioural Index is used as a directional score in the complete fo
 │   ├── 01_Objective1_ControlArchitecture/
 │   ├── 02_Objective2_PopulationReorganization/
 │   ├── 03_Objective3_StressPhenotypes/
-│   └── 04_Objective4_OperationalDefinitionsOfBehaviouralResilience/
+│   └── 04_Objective4_OperationalDefinitionsOfBehaviouralResilience/\n│       └── SPSS_TwoStep/       # Corrected syntax and classification
 ├── 03_Results/                # Recreated tables, figures and objects
 ├── 07_Environment/            # Computational environment records
 ├── .gitignore
 └── README.md
 ```
 
-The analytical scripts are being curated against the current manuscript so that obsolete exploratory versions are not included.
+The analytical workflow has been curated against the current manuscript. Obsolete exploratory versions and the separate prospective/cortisol workflow are intentionally excluded.
 
 ## Data integrity
 
@@ -83,7 +83,7 @@ The manuscript reports:
 - two-sided inference unless otherwise specified;
 - a significance threshold of *p* < 0.05.
 
-Exact package versions and execution order will be documented after the definitive scripts have been audited.
+The complete execution order is documented in [02_R/README.md](02_R/README.md), and the reported package versions are listed in [07_Environment/README.md](07_Environment/README.md).
 
 ## Reuse and citation
 
