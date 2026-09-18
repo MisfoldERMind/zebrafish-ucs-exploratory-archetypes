@@ -4,15 +4,25 @@ These scripts reproduce the analytical workflow reported in the current manuscri
 
 ## Running the workflow
 
-Run the scripts from the repository root. The scripts use the current working directory as the project root by default.
+Begin with `00_Setup/000_setup_project.R`. This script:
 
-An alternative root can be supplied without editing the scripts:
+- identifies the repository root;
+- creates any missing input, output and SPSS directories;
+- verifies the primary behavioural spreadsheet;
+- reports the next script to execute.
+
+The script is idempotent and can be run repeatedly without deleting existing files. Subsequent scripts should be executed from the repository root.
+
+An alternative root can be supplied without editing any script:
 
 ```r
-Sys.setenv(LAPCOM_UCS_PROJECT_ROOT = "C:/path/to/zebrafish-ucs-exploratory-archetypes")
+Sys.setenv(
+  LAPCOM_UCS_PROJECT_ROOT =
+    "C:/path/to/zebrafish-ucs-exploratory-archetypes"
+)
 ```
 
-The only systematic change made during repository curation was replacement of the original computer-specific Windows root with this portable project-root mechanism. Statistical operations, constants, seeds, object names and output names were preserved.
+Computer-specific Windows paths were replaced with this portable project-root mechanism. Statistical operations, constants, seeds, object names and analytical outputs were otherwise preserved.
 
 ## Execution order
 
@@ -21,7 +31,7 @@ The only systematic change made during repository curation was replacement of th
 1. `00_Setup/000_setup_project.R`
 2. `00_Setup/001_load_lapcom_data.R`
 
-The primary spreadsheet is read from `01_Data/Raw/Resultados revisados AP.xlsx`. Generated R objects are written to `01_Data/Processed/`.
+Script `000` creates or verifies the directory structure and confirms that the primary spreadsheet exists at `01_Data/Raw/Resultados revisados AP.xlsx`. Script `001` then loads and audits the 178-fish dataset. Generated R objects are written to `01_Data/Processed/`.
 
 ### 01 — Control-derived reference architecture
 
@@ -41,30 +51,22 @@ The exact-equivalence plateau spans `k = 44–46`. The representative `k = 45` c
 
 ### 02 — Population-level redistribution following UCS
 
-Run scripts `011` through `018` in numerical order.
-
-The final composite Figure 2 script is not yet included because the definitive local file `021_Figure2_Main_PCA_Mahalanobis_CORREGIDO_v4.R` has not been recovered from the available stored copies.
+Run scripts `011` through `018` in numerical order, followed by `021_Figure2_Main_PCA_Mahalanobis_CORREGIDO_v4.R` to assemble the definitive Figure 2. The plotting script inherits the corrected PCA-ellipse and Mahalanobis objects and does not recalculate inferential statistics.
 
 ### 03 — De novo post-UCS organisation
 
-Run scripts `020` through `027` in numerical order. The representative UCS graph uses `k = 48`.
-
-The final Supplementary Figure S2 script is pending recovery of the definitive local file `028_SupplementaryFigureS3_Objective3_v6.R`; its historical filename predates the present manuscript figure numbering.
+Run scripts `020` through `027` in numerical order, followed by `028_SupplementaryFigureS2_Objective3_v6.R`. The representative UCS graph uses `k = 48`.
 
 ### 04 — Operational definitions and method comparison
 
 1. Run scripts `027` through `032`.
-2. Open the exported blind dataset in IBM SPSS Statistics 27.0.1.
-3. Run the corrected Two-Step syntax without additional standardisation.
-4. Export the individual classification as `SPSS_TwoStep/Exported_Classifications/Objective4_TwoStep_Classification_CORREGIDO.xlsx`.
+2. Open the blind dataset exported by script `032` in IBM SPSS Statistics 27.0.1.
+3. Run `SPSS_TwoStep/Syntax/Objective4_TwoStep_Analysis_CORREGIDO.sps` without additional standardisation.
+4. The validated classification is archived as `SPSS_TwoStep/Exported_Classifications/Objective4_TwoStep_Classification_CORREGIDO.xlsx` and contains 89 fish in clusters of 21 and 68.
 5. Run scripts `033` through `035`.
 6. Run scripts `037` through `039`.
 
-The corrected SPSS syntax and definitive exported classification are pending recovery from the local project.
-
 ## Required R packages
-
-The curated scripts use:
 
 - cluster
 - corrplot
@@ -89,4 +91,4 @@ Package versions reported in the manuscript are documented in `07_Environment/RE
 
 ## Output policy
 
-Scripts create intermediate objects, tables and figures under `01_Data/Processed/` and `03_Results/`. These generated files are excluded from version control. The primary spreadsheet and the analytical code are the authoritative repository inputs.
+Scripts create intermediate objects, tables and figures under `01_Data/Processed/` and `03_Results/`. These generated files are excluded from version control. The primary spreadsheet and analytical code are the authoritative repository inputs.
