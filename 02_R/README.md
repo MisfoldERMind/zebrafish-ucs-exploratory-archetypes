@@ -51,7 +51,7 @@ The exact-equivalence plateau spans `k = 44–46`. The representative `k = 45` c
 
 ### 02 — Population-level redistribution following UCS
 
-Run scripts `011` through `018` in numerical order, followed by `021_Figure2_Main_PCA_Mahalanobis_CORREGIDO_v4.R` to assemble the definitive Figure 2. The plotting script inherits the corrected PCA-ellipse and Mahalanobis objects and does not recalculate inferential statistics.
+Run scripts `011` through `020` in numerical order, followed by `021_Figure2_Main_PCA_Mahalanobis_CORREGIDO_v4.R` to assemble the definitive Figure 2. Script `019` reconstructs the inherited Control-derived PC1–PC2 projection, script `020` generates the descriptive 95% normal-theory data ellipses, and script `021` combines the corrected PCA-ellipse and Mahalanobis objects without recalculating inferential statistics.
 
 ### 03 — De novo post-UCS organisation
 
