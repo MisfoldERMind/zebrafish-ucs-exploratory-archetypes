@@ -85,6 +85,8 @@ The manuscript reports:
 
 The complete execution order is documented in [02_R/README.md](02_R/README.md), and the reported package versions are listed in [07_Environment/README.md](07_Environment/README.md).
 
+A click-by-click protocol for two independent computational reproductions is available in [REPLICATION_PROTOCOL_ES.md](REPLICATION_PROTOCOL_ES.md).
+
 ## Reuse and citation
 
 The manuscript is in preparation. Citation information and a permanent archival identifier will be added when available.
