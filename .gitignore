@@ -47,3 +47,9 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# Generated analytical data and outputs
+01_Data/Processed/*
+!01_Data/Processed/README.md
+03_Results/*
+!03_Results/README.md
