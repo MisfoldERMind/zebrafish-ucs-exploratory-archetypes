@@ -67,14 +67,7 @@ cat(
 # 1. Project directory
 # ------------------------------------------------------------
 
-project_root <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+project_root <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(project_root)) {
   stop(
@@ -1003,4 +996,1485 @@ if (
 
 stress_column_means <- colMeans(
   stress_matrix
+)
+
+centered_stress_matrix <- sweep(
+  stress_matrix,
+  2L,
+  stress_column_means,
+  FUN = "-"
+)
+
+stress_matrix_rank <- qr(
+  centered_stress_matrix
+)$rank
+
+if (
+  stress_matrix_rank !=
+    length(robust_variables)
+) {
+  stop(
+    "The centred Stress behavioural matrix does not have full rank: ",
+    stress_matrix_rank,
+    " of ",
+    length(robust_variables),
+    "."
+  )
+}
+
+if (
+  as.integer(
+    setup_object[["Stress_matrix_rank"]]
+  ) != stress_matrix_rank
+) {
+  stop(
+    "The centred Stress matrix rank differs from the corrected ",
+    "Script 020 setup audit."
+  )
+}
+
+
+# ------------------------------------------------------------
+# 12. Fit the de novo Stress PCA without additional scaling
+# ------------------------------------------------------------
+
+pca_stress <- stats::prcomp(
+  stress_matrix,
+  center = TRUE,
+  scale. = FALSE,
+  retx = TRUE
+)
+
+if (!inherits(
+  pca_stress,
+  "prcomp"
+)) {
+  stop(
+    "The PCA model was not created successfully."
+  )
+}
+
+if (
+  isFALSE(
+    pca_stress$center
+  ) ||
+  !isFALSE(
+    pca_stress$scale
+  )
+) {
+  stop(
+    "The PCA specification is incorrect: centring must be TRUE and ",
+    "additional scaling must be FALSE."
+  )
+}
+
+if (
+  !isTRUE(
+    all.equal(
+      as.numeric(
+        pca_stress$center
+      ),
+      as.numeric(
+        stress_column_means
+      ),
+      tolerance = numeric_tolerance,
+      check.attributes = FALSE
+    )
+  )
+) {
+  stop(
+    "The PCA centring vector does not reproduce the arithmetic ",
+    "Stress means."
+  )
+}
+
+if (
+  !identical(
+    dim(
+      pca_stress$x
+    ),
+    c(
+      expected_stress_n,
+      4L
+    )
+  ) ||
+  !identical(
+    dim(
+      pca_stress$rotation
+    ),
+    c(
+      4L,
+      4L
+    )
+  )
+) {
+  stop(
+    "The PCA score or rotation matrix has unexpected dimensions."
+  )
+}
+
+if (
+  any(
+    !is.finite(
+      pca_stress$x
+    )
+  ) ||
+  any(
+    !is.finite(
+      pca_stress$rotation
+    )
+  ) ||
+  any(
+    !is.finite(
+      pca_stress$sdev
+    )
+  )
+) {
+  stop(
+    "The PCA model contains missing or non-finite values."
+  )
+}
+
+
+# ------------------------------------------------------------
+# 13. Apply deterministic component orientation
+# ------------------------------------------------------------
+
+orientation_multipliers <- rep(
+  1,
+  ncol(
+    pca_stress$rotation
+  )
+)
+
+names(
+  orientation_multipliers
+) <- colnames(
+  pca_stress$rotation
+)
+
+for (
+  component_i in seq_len(
+    ncol(
+      pca_stress$rotation
+    )
+  )
+) {
+  anchor_index <- which.max(
+    abs(
+      pca_stress$rotation[
+        ,
+        component_i
+      ]
+    )
+  )
+
+  if (
+    pca_stress$rotation[
+      anchor_index,
+      component_i
+    ] < 0
+  ) {
+    orientation_multipliers[
+      component_i
+    ] <- -1
+  }
+}
+
+pca_stress$rotation <- sweep(
+  pca_stress$rotation,
+  2L,
+  orientation_multipliers,
+  FUN = "*"
+)
+
+pca_stress$x <- sweep(
+  pca_stress$x,
+  2L,
+  orientation_multipliers,
+  FUN = "*"
+)
+
+
+# ------------------------------------------------------------
+# 14. Audit the PCA decomposition
+# ------------------------------------------------------------
+
+component_names <- paste0(
+  "PC",
+  seq_len(
+    ncol(
+      stress_matrix
+    )
+  )
+)
+
+colnames(
+  pca_stress$x
+) <- component_names
+
+colnames(
+  pca_stress$rotation
+) <- component_names
+
+rownames(
+  pca_stress$rotation
+) <- robust_variables
+
+maximum_reconstruction_error <- max(
+  abs(
+    centered_stress_matrix -
+      pca_stress$x %*%
+      t(
+        pca_stress$rotation
+      )
+  )
+)
+
+if (
+  !is.finite(
+    maximum_reconstruction_error
+  ) ||
+  maximum_reconstruction_error >
+    numeric_tolerance
+) {
+  stop(
+    "The PCA decomposition does not reconstruct the centred Stress ",
+    "matrix within tolerance. Maximum error = ",
+    format(
+      maximum_reconstruction_error,
+      scientific = TRUE
+    )
+  )
+}
+
+rotation_crossproduct <- crossprod(
+  pca_stress$rotation
+)
+
+maximum_orthogonality_error <- max(
+  abs(
+    rotation_crossproduct -
+      diag(
+        ncol(
+          pca_stress$rotation
+        )
+      )
+  )
+)
+
+if (
+  !is.finite(
+    maximum_orthogonality_error
+  ) ||
+  maximum_orthogonality_error >
+    orthogonality_tolerance
+) {
+  stop(
+    "The PCA rotation matrix is not orthonormal within tolerance. ",
+    "Maximum error = ",
+    format(
+      maximum_orthogonality_error,
+      scientific = TRUE
+    )
+  )
+}
+
+score_covariance <- stats::cov(
+  pca_stress$x
+)
+
+score_covariance_off_diagonal <-
+  score_covariance
+
+diag(
+  score_covariance_off_diagonal
+) <- 0
+
+maximum_score_covariance <- max(
+  abs(
+    score_covariance_off_diagonal
+  )
+)
+
+if (
+  !is.finite(
+    maximum_score_covariance
+  ) ||
+  maximum_score_covariance >
+    1e-10
+) {
+  stop(
+    "The PCA component scores are not mutually uncorrelated within ",
+    "numerical tolerance. Maximum covariance = ",
+    format(
+      maximum_score_covariance,
+      scientific = TRUE
+    )
+  )
+}
+
+
+# ------------------------------------------------------------
+# 15. Derive PCA tables
+# ------------------------------------------------------------
+
+eigenvalues <- pca_stress$sdev^2
+
+percentage_of_variance <-
+  100 *
+  eigenvalues /
+  sum(
+    eigenvalues
+  )
+
+cumulative_variance <- cumsum(
+  percentage_of_variance
+)
+
+if (
+  any(
+    !is.finite(
+      percentage_of_variance
+    )
+  ) ||
+  abs(
+    sum(
+      percentage_of_variance
+    ) -
+      100
+  ) >
+    1e-10
+) {
+  stop(
+    "The PCA explained-variance percentages are invalid."
+  )
+}
+
+pca_variance <- tibble::tibble(
+  Component =
+    component_names,
+  Eigenvalue =
+    as.numeric(
+      eigenvalues
+    ),
+  Percentage_of_variance =
+    as.numeric(
+      percentage_of_variance
+    ),
+  Cumulative_variance_percent =
+    as.numeric(
+      cumulative_variance
+    )
+)
+
+pca_loadings <- tibble::tibble(
+  Variable =
+    robust_variables,
+  Variable_label =
+    unname(
+      variable_labels[
+        robust_variables
+      ]
+    )
+) %>%
+  dplyr::bind_cols(
+    tibble::as_tibble(
+      pca_stress$rotation,
+      .name_repair = "minimal"
+    )
+  )
+
+pca_contributions <- tibble::tibble(
+  Variable =
+    robust_variables,
+  Variable_label =
+    unname(
+      variable_labels[
+        robust_variables
+      ]
+    )
+) %>%
+  dplyr::bind_cols(
+    tibble::as_tibble(
+      100 *
+        pca_stress$rotation^2,
+      .name_repair = "minimal"
+    )
+  )
+
+contribution_sums <- colSums(
+  pca_contributions[
+    ,
+    component_names,
+    drop = FALSE
+  ]
+)
+
+if (
+  any(
+    abs(
+      contribution_sums -
+        100
+    ) >
+      1e-10
+  )
+) {
+  stop(
+    "The variable contributions do not sum to 100% for every PC."
+  )
+}
+
+variable_pc_correlations <- stats::cor(
+  stress_matrix,
+  pca_stress$x
+)
+
+pca_variable_correlations <- tibble::tibble(
+  Variable =
+    robust_variables,
+  Variable_label =
+    unname(
+      variable_labels[
+        robust_variables
+      ]
+    )
+) %>%
+  dplyr::bind_cols(
+    tibble::as_tibble(
+      variable_pc_correlations,
+      .name_repair = "minimal"
+    )
+  )
+
+pca_scores <- tibble::tibble(
+  Author =
+    stress$Author,
+  ID =
+    stress$ID,
+  Traceability_ID =
+    stress$Traceability_ID,
+  Treatment =
+    as.character(
+      stress$Treatment
+    )
+) %>%
+  dplyr::bind_cols(
+    tibble::as_tibble(
+      pca_stress$x,
+      .name_repair = "minimal"
+    )
+  )
+
+if (
+  nrow(pca_scores) != expected_stress_n ||
+  anyNA(
+    pca_scores[
+      c(
+        "Author",
+        "ID",
+        "Traceability_ID",
+        "Treatment"
+      )
+    ]
+  ) ||
+  anyDuplicated(
+    pca_scores$Traceability_ID
+  ) > 0L ||
+  !identical(
+    pca_scores$Traceability_ID,
+    stress$Traceability_ID
+  ) ||
+  !all(
+    pca_scores$Treatment == "Stress"
+  )
+) {
+  stop(
+    "The PCA score table fails the Author + ID traceability audit."
+  )
+}
+
+pca_score_matrix <- as.matrix(
+  pca_scores[
+    component_names
+  ]
+)
+
+storage.mode(
+  pca_score_matrix
+) <- "double"
+
+if (
+  any(
+    !is.finite(
+      pca_score_matrix
+    )
+  )
+) {
+  stop(
+    "The PCA score table contains non-finite values."
+  )
+}
+
+
+# ------------------------------------------------------------
+# 16. Construct the 95% normal-theory PC1-PC2 data ellipse
+# ------------------------------------------------------------
+
+pc12_scores <- as.matrix(
+  pca_scores[
+    c(
+      "PC1",
+      "PC2"
+    )
+  ]
+)
+
+storage.mode(
+  pc12_scores
+) <- "double"
+
+pc12_centroid <- colMeans(
+  pc12_scores
+)
+
+pc12_covariance <- stats::cov(
+  pc12_scores
+)
+
+pc12_eigendecomposition <- eigen(
+  pc12_covariance,
+  symmetric = TRUE
+)
+
+if (
+  any(
+    !is.finite(
+      pc12_covariance
+    )
+  ) ||
+  any(
+    pc12_eigendecomposition$values <= 0
+  )
+) {
+  stop(
+    "The PC1-PC2 covariance matrix is not positive definite."
+  )
+}
+
+ellipse_angles <- seq(
+  0,
+  2 * pi,
+  length.out = 361L
+)
+
+ellipse_unit_circle <- rbind(
+  cos(
+    ellipse_angles
+  ),
+  sin(
+    ellipse_angles
+  )
+)
+
+ellipse_transform <-
+  pc12_eigendecomposition$vectors %*%
+  diag(
+    sqrt(
+      pc12_eigendecomposition$values
+    ),
+    nrow = 2L,
+    ncol = 2L
+  )
+
+ellipse_radius <- sqrt(
+  stats::qchisq(
+    ellipse_level,
+    df = 2L
+  )
+)
+
+ellipse_offsets <-
+  ellipse_radius *
+  ellipse_transform %*%
+  ellipse_unit_circle
+
+ellipse_coordinates <- t(
+  sweep(
+    ellipse_offsets,
+    1L,
+    pc12_centroid,
+    FUN = "+"
+  )
+)
+
+ellipse_data <- tibble::tibble(
+  Ellipse_order =
+    seq_len(
+      nrow(
+        ellipse_coordinates
+      )
+    ),
+  PC1 =
+    ellipse_coordinates[
+      ,
+      1L
+    ],
+  PC2 =
+    ellipse_coordinates[
+      ,
+      2L
+    ]
+)
+
+pc12_mahalanobis_squared <- stats::mahalanobis(
+  pc12_scores,
+  center = pc12_centroid,
+  cov = pc12_covariance
+)
+
+ellipse_threshold <- stats::qchisq(
+  ellipse_level,
+  df = 2L
+)
+
+ellipse_inside <-
+  pc12_mahalanobis_squared <=
+  ellipse_threshold
+
+ellipse_inside_n <- sum(
+  ellipse_inside
+)
+
+ellipse_inside_percent <-
+  100 *
+  mean(
+    ellipse_inside
+  )
+
+ellipse_diagnostics <- tibble::tibble(
+  Level =
+    ellipse_level,
+  PC1_centroid =
+    unname(
+      pc12_centroid[
+        1L
+      ]
+    ),
+  PC2_centroid =
+    unname(
+      pc12_centroid[
+        2L
+      ]
+    ),
+  Covariance_PC1 =
+    pc12_covariance[
+      1L,
+      1L
+    ],
+  Covariance_PC2 =
+    pc12_covariance[
+      2L,
+      2L
+    ],
+  Covariance_PC1_PC2 =
+    pc12_covariance[
+      1L,
+      2L
+    ],
+  Individuals_inside =
+    ellipse_inside_n,
+  Total_individuals =
+    expected_stress_n,
+  Percent_inside =
+    ellipse_inside_percent
+)
+
+
+# ------------------------------------------------------------
+# 17. Create Figure 2
+# ------------------------------------------------------------
+
+pc1_percent <-
+  percentage_of_variance[
+    1L
+  ]
+
+pc2_percent <-
+  percentage_of_variance[
+    2L
+  ]
+
+pc12_percent <-
+  pc1_percent +
+  pc2_percent
+
+pca_plot <- ggplot2::ggplot() +
+  ggplot2::geom_polygon(
+    data =
+      ellipse_data,
+    mapping =
+      ggplot2::aes(
+        x = PC1,
+        y = PC2
+      ),
+    fill =
+      stress_colour,
+    alpha =
+      0.16,
+    colour =
+      NA
+  ) +
+  ggplot2::geom_path(
+    data =
+      ellipse_data,
+    mapping =
+      ggplot2::aes(
+        x = PC1,
+        y = PC2
+      ),
+    colour =
+      stress_colour,
+    linewidth =
+      0.95
+  ) +
+  ggplot2::geom_point(
+    data =
+      pca_scores,
+    mapping =
+      ggplot2::aes(
+        x = PC1,
+        y = PC2
+      ),
+    shape =
+      21,
+    size =
+      2.6,
+    stroke =
+      0.35,
+    fill =
+      stress_colour,
+    colour =
+      "black",
+    alpha =
+      0.82
+  ) +
+  ggplot2::labs(
+    x = paste0(
+      "PC1 (",
+      format(
+        round(
+          pc1_percent,
+          1
+        ),
+        nsmall = 1
+      ),
+      "%)"
+    ),
+    y = paste0(
+      "PC2 (",
+      format(
+        round(
+          pc2_percent,
+          1
+        ),
+        nsmall = 1
+      ),
+      "%)"
+    )
+  ) +
+  ggplot2::coord_equal() +
+  ggplot2::theme_classic(
+    base_size = 12,
+    base_family = "Arial"
+  ) +
+  ggplot2::theme(
+    panel.border =
+      ggplot2::element_rect(
+        colour = "black",
+        fill = NA,
+        linewidth = 0.6
+      ),
+    axis.title =
+      ggplot2::element_text(
+        colour = "black"
+      ),
+    axis.text =
+      ggplot2::element_text(
+        colour = "black"
+      ),
+    plot.background =
+      ggplot2::element_rect(
+        fill = "white",
+        colour = NA
+      ),
+    panel.background =
+      ggplot2::element_rect(
+        fill = "white",
+        colour = NA
+      ),
+    plot.margin =
+      ggplot2::margin(
+        8,
+        10,
+        8,
+        8
+      )
+  )
+
+
+# ------------------------------------------------------------
+# 18. Prepare export metadata
+# ------------------------------------------------------------
+
+metadata_export <- data.frame(
+  Field = c(
+    "Objective",
+    "Scientific question",
+    "Operational question",
+    "Analytical population",
+    "Stress n",
+    "Traceability",
+    "Authors/cohorts",
+    "Reference space",
+    "Normalisation",
+    "PCA fitted de novo within Stress",
+    "PCA centred",
+    "PCA additionally scaled",
+    "Control-method consistency",
+    "PC1 variance percent",
+    "PC2 variance percent",
+    "PC1-PC2 cumulative variance percent",
+    "Ellipse type",
+    "Ellipse level",
+    "Interpretive constraint"
+  ),
+  Value = c(
+    "Objective 3",
+    as.character(
+      setup_object[["Scientific_question"]]
+    ),
+    as.character(
+      setup_object[["Operational_question"]]
+    ),
+    "Stress only",
+    as.character(
+      expected_stress_n
+    ),
+    expected_traceability,
+    paste(
+      population_authors,
+      collapse = ", "
+    ),
+    as.character(
+      setup_object[["Reference_space"]]
+    ),
+    expected_normalisation,
+    "Yes",
+    "Yes; arithmetic Stress mean",
+    "No; inherited robust units preserved",
+    paste(
+      "Same PCA specification used for the Control architecture:",
+      "mean-centring with no additional scaling"
+    ),
+    as.character(
+      pc1_percent
+    ),
+    as.character(
+      pc2_percent
+    ),
+    as.character(
+      pc12_percent
+    ),
+    "95% normal-theory data ellipse; not a confidence region",
+    as.character(
+      ellipse_level
+    ),
+    paste(
+      "PCA describes dominant internal variation before clustering;",
+      "it does not define discrete post-stress phenotypes"
+    )
+  ),
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+
+# ------------------------------------------------------------
+# 19. Save tables and reusable PCA objects
+# ------------------------------------------------------------
+
+openxlsx::write.xlsx(
+  x = list(
+    Explained_variance =
+      as.data.frame(
+        pca_variance
+      ),
+    Loadings =
+      as.data.frame(
+        pca_loadings
+      ),
+    Contributions_percent =
+      as.data.frame(
+        pca_contributions
+      ),
+    Variable_PC_correlations =
+      as.data.frame(
+        pca_variable_correlations
+      ),
+    Scores =
+      as.data.frame(
+        pca_scores
+      ),
+    Author_recalculation_audit =
+      as.data.frame(
+        normalisation_recalculation_audit
+      ),
+    Ellipse_diagnostics =
+      as.data.frame(
+        ellipse_diagnostics
+      ),
+    Metadata =
+      metadata_export
+  ),
+  file =
+    xlsx_output,
+  overwrite =
+    TRUE
+)
+
+utils::write.csv(
+  pca_variance,
+  variance_csv_output,
+  row.names = FALSE,
+  na = ""
+)
+
+utils::write.csv(
+  pca_loadings,
+  loadings_csv_output,
+  row.names = FALSE,
+  na = ""
+)
+
+utils::write.csv(
+  pca_scores,
+  scores_csv_output,
+  row.names = FALSE,
+  na = ""
+)
+
+pca_results <- list(
+  Objective =
+    "Objective 3",
+  Scientific_question =
+    setup_object[["Scientific_question"]],
+  Operational_question =
+    setup_object[["Operational_question"]],
+  Analytical_population =
+    "Stress only",
+  Stress_n =
+    expected_stress_n,
+  Authors =
+    population_authors,
+  Traceability =
+    expected_traceability,
+  Reference_space =
+    setup_object[["Reference_space"]],
+  Normalisation =
+    setup_object[["Normalisation"]],
+  Normalisation_formula =
+    setup_object[["Normalisation_formula"]],
+  Behavioural_variables =
+    behavioural_variables,
+  Robust_variables =
+    robust_variables,
+  Variable_labels =
+    variable_labels,
+  Author_specific_normalisation_recalculation_audit =
+    normalisation_recalculation_audit,
+  Stress_matrix_rank =
+    stress_matrix_rank,
+  PCA_scope =
+    "De novo within the Stress population",
+  PCA_center =
+    TRUE,
+  PCA_center_values =
+    pca_stress$center,
+  PCA_scale =
+    FALSE,
+  PCA_method_consistency =
+    "Mean-centred, no additional scaling, matching corrected Control PCA logic",
+  PCA_model =
+    pca_stress,
+  PCA_variance =
+    pca_variance,
+  PCA_loadings =
+    pca_loadings,
+  PCA_contributions_percent =
+    pca_contributions,
+  Variable_PC_correlations =
+    pca_variable_correlations,
+  PCA_scores =
+    pca_scores,
+  Orientation_multipliers =
+    orientation_multipliers,
+  Maximum_reconstruction_error =
+    maximum_reconstruction_error,
+  Maximum_orthogonality_error =
+    maximum_orthogonality_error,
+  Maximum_score_covariance =
+    maximum_score_covariance,
+  PC1_PC2_cumulative_variance_percent =
+    pc12_percent,
+  Ellipse_level =
+    ellipse_level,
+  Ellipse_coordinates =
+    ellipse_data,
+  Ellipse_diagnostics =
+    ellipse_diagnostics,
+  Source_stress_file =
+    stress_input,
+  Source_setup_file =
+    setup_input,
+  Downstream_constraint = paste(
+    "Louvain must operate on the complete four-dimensional",
+    "inherited robust Stress coordinates, not on PC1-PC2 alone"
+  ),
+  Interpretive_constraint = paste(
+    "PCA describes dominant internal variation within Stress before",
+    "community detection and does not establish discrete resilient-like",
+    "or susceptible-like phenotypes"
+  )
+)
+
+saveRDS(
+  pca_stress,
+  model_output
+)
+
+saveRDS(
+  pca_scores,
+  scores_output
+)
+
+saveRDS(
+  pca_results,
+  results_output
+)
+
+capture.output(
+  utils::sessionInfo(),
+  file = session_info_output
+)
+
+
+# ------------------------------------------------------------
+# 20. Save Figure 2
+# ------------------------------------------------------------
+
+if (!capabilities("cairo")) {
+  stop(
+    "Cairo graphics support is required to export the PDF with the ",
+    "Arial font. This R installation reports capabilities('cairo') = FALSE."
+  )
+}
+
+ggplot2::ggsave(
+  filename =
+    pdf_output,
+  plot =
+    pca_plot,
+  device =
+    grDevices::cairo_pdf,
+  width =
+    7,
+  height =
+    6,
+  units =
+    "in",
+  bg =
+    "white"
+)
+
+ggplot2::ggsave(
+  filename =
+    tiff_output,
+  plot =
+    pca_plot,
+  device =
+    "tiff",
+  width =
+    7,
+  height =
+    6,
+  units =
+    "in",
+  dpi =
+    600,
+  compression =
+    "lzw",
+  bg =
+    "white"
+)
+
+
+# ------------------------------------------------------------
+# 21. Confirm output creation
+# ------------------------------------------------------------
+
+expected_output_files <- c(
+  pdf_output,
+  tiff_output,
+  xlsx_output,
+  variance_csv_output,
+  loadings_csv_output,
+  scores_csv_output,
+  model_output,
+  scores_output,
+  results_output,
+  session_info_output
+)
+
+missing_output_files <- expected_output_files[
+  !file.exists(
+    expected_output_files
+  )
+]
+
+if (
+  length(
+    missing_output_files
+  ) > 0L
+) {
+  stop(
+    "The following expected outputs were not created:\n",
+    paste(
+      missing_output_files,
+      collapse = "\n"
+    )
+  )
+}
+
+output_file_information <- file.info(
+  expected_output_files
+)
+
+if (
+  any(
+    is.na(
+      output_file_information$size
+    )
+  ) ||
+  any(
+    output_file_information$size <= 0
+  )
+) {
+  stop(
+    "At least one expected output file is empty or inaccessible."
+  )
+}
+
+
+# ------------------------------------------------------------
+# 22. Final console audit
+# ------------------------------------------------------------
+
+pc1_loading_order <- order(
+  abs(
+    pca_stress$rotation[
+      ,
+      "PC1"
+    ]
+  ),
+  decreasing = TRUE
+)
+
+pc2_loading_order <- order(
+  abs(
+    pca_stress$rotation[
+      ,
+      "PC2"
+    ]
+  ),
+  decreasing = TRUE
+)
+
+cat(
+  "\n============================================================\n"
+)
+
+cat(
+  "OBJECTIVE 3 - CORRECTED STRESS PCA\n"
+)
+
+cat(
+  "============================================================\n"
+)
+
+cat(
+  "\nAnalytical population: Stress only (n = ",
+  expected_stress_n,
+  ")\n",
+  sep = ""
+)
+
+cat(
+  "Traceability: ",
+  expected_traceability,
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Authors/cohorts retained: ",
+  paste(
+    population_authors,
+    collapse = ", "
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Analytical scale: Author-specific Control-referenced robust ",
+  "coordinates inherited unchanged from corrected Objectives 1 and 2.\n",
+  sep = ""
+)
+
+cat(
+  "Normalisation: ",
+  expected_normalisation,
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nAuthor-specific robust-score recalculation audit:\n"
+)
+
+print(
+  normalisation_recalculation_audit,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nMaximum robust-score recalculation difference: ",
+  format(
+    max(
+      normalisation_recalculation_audit[[
+        "Maximum_absolute_recalculation_difference"
+      ]]
+    ),
+    scientific = TRUE
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nPCA specification: fitted de novo within Stress, centred = TRUE, ",
+  "additional scaling = FALSE.\n",
+  sep = ""
+)
+
+cat(
+  "This is the same PCA specification used for the corrected Control ",
+  "architecture: arithmetic mean-centring with no additional scaling.\n",
+  sep = ""
+)
+
+cat(
+  "Centred Stress behavioural-matrix rank: ",
+  stress_matrix_rank,
+  " of ",
+  length(
+    robust_variables
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Maximum PCA reconstruction error: ",
+  format(
+    maximum_reconstruction_error,
+    scientific = TRUE
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Maximum rotation orthogonality error: ",
+  format(
+    maximum_orthogonality_error,
+    scientific = TRUE
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Maximum off-diagonal covariance between PC scores: ",
+  format(
+    maximum_score_covariance,
+    scientific = TRUE
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nExplained variance:\n"
+)
+
+print(
+  pca_variance,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nPCA loadings:\n"
+)
+
+print(
+  pca_loadings,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nVariable contributions (%):\n"
+)
+
+print(
+  pca_contributions,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nVariable-PC correlations:\n"
+)
+
+print(
+  pca_variable_correlations,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nPC1-PC2 cumulative explained variance: ",
+  sprintf(
+    "%.2f",
+    pc12_percent
+  ),
+  "%.\n",
+  sep = ""
+)
+
+cat(
+  "Individuals inside the 95% normal-theory PC1-PC2 data ellipse: ",
+  ellipse_inside_n,
+  " of ",
+  expected_stress_n,
+  " (",
+  sprintf(
+    "%.1f",
+    ellipse_inside_percent
+  ),
+  "%).\n",
+  sep = ""
+)
+
+cat(
+  "\nLargest absolute PC1 loading: ",
+  unname(
+    variable_labels[
+      rownames(
+        pca_stress$rotation
+      )[
+        pc1_loading_order[
+          1L
+        ]
+      ]
+    ]
+  ),
+  " (loading = ",
+  sprintf(
+    "%.3f",
+    pca_stress$rotation[
+      pc1_loading_order[
+        1L
+      ],
+      "PC1"
+    ]
+  ),
+  ").\n",
+  sep = ""
+)
+
+cat(
+  "Largest absolute PC2 loading: ",
+  unname(
+    variable_labels[
+      rownames(
+        pca_stress$rotation
+      )[
+        pc2_loading_order[
+          1L
+        ]
+      ]
+    ]
+  ),
+  " (loading = ",
+  sprintf(
+    "%.3f",
+    pca_stress$rotation[
+      pc2_loading_order[
+        1L
+      ],
+      "PC2"
+    ]
+  ),
+  ").\n",
+  sep = ""
+)
+
+cat(
+  "\nInterpretive constraint: this PCA summarises dominant internal ",
+  "variation within Stress. It does not, by itself, demonstrate ",
+  "discrete resilient-like or susceptible-like phenotypes.\n",
+  sep = ""
+)
+
+cat(
+  "The PC1-PC2 display must not replace the complete four-dimensional ",
+  "robust behavioural space for de novo Louvain community detection.\n",
+  sep = ""
+)
+
+cat(
+  "\nOutputs created:\n"
+)
+
+for (
+  output_file in expected_output_files
+) {
+  cat(
+    normalizePath(
+      output_file,
+      winslash = "/",
+      mustWork = FALSE
+    ),
+    "\n",
+    sep = ""
+  )
+}
+
+cat(
+  "\n============================================================\n"
 )
