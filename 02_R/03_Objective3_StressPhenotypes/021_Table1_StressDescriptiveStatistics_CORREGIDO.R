@@ -52,14 +52,7 @@ cat(
 # 1. Project directory
 # ------------------------------------------------------------
 
-project_root <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+project_root <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(project_root)) {
   stop(
@@ -1005,3 +998,463 @@ summary_numeric_matrix <- as.matrix(
 
 storage.mode(
   summary_numeric_matrix
+) <- "double"
+
+if (
+  any(
+    !is.finite(
+      summary_numeric_matrix
+    )
+  )
+) {
+  stop(
+    "The descriptive table contains non-finite statistics."
+  )
+}
+
+
+# ------------------------------------------------------------
+# 12. Verify exact agreement with corrected Script 020 summary
+# ------------------------------------------------------------
+
+setup_summary <-
+  setup_object[[
+    "Stress_robust_summary"
+  ]]
+
+if (!is.data.frame(setup_summary)) {
+  stop(
+    "setup_object$Stress_robust_summary is not a data frame."
+  )
+}
+
+required_setup_summary_columns <- c(
+  "Variable",
+  "n",
+  "Mean",
+  "SD",
+  "Median",
+  "Q1",
+  "Q3",
+  "IQR",
+  "MAD_scaled",
+  "Minimum",
+  "Maximum"
+)
+
+missing_setup_summary_columns <- setdiff(
+  required_setup_summary_columns,
+  names(setup_summary)
+)
+
+if (
+  length(
+    missing_setup_summary_columns
+  ) > 0L
+) {
+  stop(
+    "The corrected setup summary is missing:\n",
+    paste(
+      missing_setup_summary_columns,
+      collapse = ", "
+    )
+  )
+}
+
+setup_summary <- setup_summary[
+  match(
+    robust_variables,
+    as.character(
+      setup_summary$Variable
+    )
+  ),
+  required_setup_summary_columns,
+  drop = FALSE
+]
+
+if (
+  nrow(setup_summary) !=
+    length(robust_variables) ||
+  anyNA(
+    setup_summary$Variable
+  ) ||
+  !identical(
+    as.character(
+      setup_summary$Variable
+    ),
+    robust_variables
+  )
+) {
+  stop(
+    "The corrected setup summary does not contain one correctly ",
+    "ordered row per robust variable."
+  )
+}
+
+current_summary_for_comparison <-
+  stress_descriptive %>%
+  dplyr::transmute(
+    Variable = Robust_variable,
+    n = n,
+    Mean = Mean,
+    SD = SD,
+    Median = Median,
+    Q1 = Q1,
+    Q3 = Q3,
+    IQR = IQR,
+    MAD_scaled = MAD_scaled,
+    Minimum = Minimum,
+    Maximum = Maximum
+  )
+
+if (
+  !identical(
+    as.integer(
+      current_summary_for_comparison$n
+    ),
+    as.integer(
+      setup_summary$n
+    )
+  )
+) {
+  stop(
+    "The descriptive sample sizes do not match corrected Script 020."
+  )
+}
+
+summary_comparison_columns <- setdiff(
+  required_setup_summary_columns,
+  c(
+    "Variable",
+    "n"
+  )
+)
+
+summary_maximum_differences <- vapply(
+  summary_comparison_columns,
+  function(column_i) {
+    max(
+      abs(
+        current_summary_for_comparison[[
+          column_i
+        ]] -
+          setup_summary[[
+            column_i
+          ]]
+      )
+    )
+  },
+  numeric(1)
+)
+
+if (
+  any(
+    !is.finite(
+      summary_maximum_differences
+    )
+  ) ||
+  any(
+    summary_maximum_differences >
+      summary_tolerance
+  )
+) {
+  stop(
+    "The descriptive statistics do not reproduce the definitive ",
+    "corrected Script 020 summary."
+  )
+}
+
+
+# ------------------------------------------------------------
+# 13. Prepare Excel display tables
+# ------------------------------------------------------------
+
+excel_table <- stress_descriptive %>%
+  dplyr::select(
+    Variable,
+    Robust_variable,
+    n,
+    Mean,
+    SD,
+    Median,
+    Q1,
+    Q3,
+    IQR,
+    MAD_scaled,
+    Minimum,
+    Maximum
+  ) %>%
+  dplyr::rename(
+    `Analytical variable` =
+      Robust_variable,
+    `Scaled MAD` =
+      MAD_scaled
+  )
+
+author_recalculation_table <-
+  normalisation_recalculation_audit
+
+
+# ------------------------------------------------------------
+# 14. Save tables and reproducibility objects
+# ------------------------------------------------------------
+
+utils::write.csv(
+  stress_descriptive,
+  csv_output,
+  row.names = FALSE,
+  na = ""
+)
+
+workbook <- openxlsx::createWorkbook()
+
+openxlsx::addWorksheet(
+  workbook,
+  "Stress descriptive"
+)
+
+openxlsx::writeData(
+  workbook,
+  sheet = "Stress descriptive",
+  x = excel_table
+)
+
+openxlsx::addWorksheet(
+  workbook,
+  "Author recalculation audit"
+)
+
+openxlsx::writeData(
+  workbook,
+  sheet = "Author recalculation audit",
+  x = author_recalculation_table
+)
+
+openxlsx::saveWorkbook(
+  workbook,
+  file = xlsx_output,
+  overwrite = TRUE
+)
+
+descriptive_object <- list(
+  Objective = "Objective 3",
+  Table =
+    "Stress descriptive statistics before de novo community detection",
+  Scientific_question =
+    setup_object[["Scientific_question"]],
+  Operational_question =
+    setup_object[["Operational_question"]],
+  Analytical_population =
+    "Stress only",
+  Stress_n =
+    nrow(stress),
+  Authors =
+    population_authors,
+  Traceability =
+    expected_traceability,
+  Reference_space =
+    setup_object[["Reference_space"]],
+  Normalisation =
+    setup_object[["Normalisation"]],
+  Normalisation_formula =
+    setup_object[["Normalisation_formula"]],
+  Behavioural_variables =
+    behavioural_variables,
+  Robust_variables =
+    robust_variables,
+  Variable_dictionary =
+    variable_dictionary,
+  Full_precision_table =
+    stress_descriptive,
+  Author_specific_normalisation_recalculation_audit =
+    normalisation_recalculation_audit,
+  Setup_summary_maximum_absolute_differences =
+    summary_maximum_differences,
+  Source_stress_file =
+    stress_input,
+  Source_setup_file =
+    setup_input,
+  Excel_file =
+    xlsx_output,
+  CSV_file =
+    csv_output
+)
+
+saveRDS(
+  descriptive_object,
+  object_output
+)
+
+capture.output(
+  utils::sessionInfo(),
+  file = session_info_output
+)
+
+
+# ------------------------------------------------------------
+# 15. Confirm output creation
+# ------------------------------------------------------------
+
+expected_output_files <- c(
+  xlsx_output,
+  csv_output,
+  object_output,
+  session_info_output
+)
+
+missing_output_files <-
+  expected_output_files[
+    !file.exists(
+      expected_output_files
+    )
+  ]
+
+if (
+  length(
+    missing_output_files
+  ) > 0L
+) {
+  stop(
+    "The following expected outputs were not created:\n",
+    paste(
+      missing_output_files,
+      collapse = "\n"
+    )
+  )
+}
+
+
+# ------------------------------------------------------------
+# 16. Final console audit
+# ------------------------------------------------------------
+
+cat(
+  "\n============================================================\n"
+)
+
+cat(
+  "OBJECTIVE 3 - CORRECTED STRESS DESCRIPTIVE STATISTICS\n"
+)
+
+cat(
+  "============================================================\n"
+)
+
+cat(
+  "\nAnalytical population: Stress only (n = ",
+  nrow(stress),
+  ")\n",
+  sep = ""
+)
+
+cat(
+  "Traceability: ",
+  expected_traceability,
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Authors/cohorts retained: ",
+  paste(
+    population_authors,
+    collapse = ", "
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Analytical scale: Author-specific Control-referenced robust ",
+  "coordinates inherited unchanged from corrected Objectives 1 and 2.\n",
+  sep = ""
+)
+
+cat(
+  "Normalisation: ",
+  expected_normalisation,
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nAuthor-specific robust-score recalculation audit:\n"
+)
+
+print(
+  normalisation_recalculation_audit,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nMaximum robust-score recalculation difference: ",
+  format(
+    max(
+      normalisation_recalculation_audit[[
+        "Maximum_absolute_recalculation_difference"
+      ]]
+    ),
+    scientific = TRUE
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Maximum difference from the definitive corrected Script 020 summary: ",
+  format(
+    max(
+      summary_maximum_differences
+    ),
+    scientific = TRUE
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nFull-precision descriptive statistics:\n"
+)
+
+print(
+  stress_descriptive,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nInterpretive constraint: these statistics describe the ",
+  "pre-clustering Stress space only. They do not identify, define, ",
+  "or validate resilient-like or susceptible-like phenotypes.\n",
+  sep = ""
+)
+
+cat(
+  "\nDownstream constraint: PCA and Louvain must use the same four ",
+  "*_rz coordinates without additional scaling or Stress-specific ",
+  "normalisation.\n",
+  sep = ""
+)
+
+cat(
+  "\nOutputs saved as:\n"
+)
+
+for (
+  output_file in expected_output_files
+) {
+  cat(
+    normalizePath(
+      output_file,
+      winslash = "/",
+      mustWork = FALSE
+    ),
+    "\n",
+    sep = ""
+  )
+}
+
+cat(
+  "\n============================================================\n"
+)
