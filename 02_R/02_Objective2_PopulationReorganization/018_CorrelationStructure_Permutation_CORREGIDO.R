@@ -25,14 +25,7 @@
 # 1. Project directory and packages
 # ------------------------------------------------------------
 
-project_root <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+project_root <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(project_root)) {
   stop("Project directory not found:\n", project_root)
@@ -1005,3 +998,213 @@ results_object <- list(
   Control_correlation_matrix = cor_control,
   Stress_correlation_matrix = cor_stress,
   Difference_matrix_Stress_minus_Control = difference_matrix,
+  Global_result = global_result,
+  Pairwise_results = pairwise_results,
+  Pairwise_results_original_order = pairwise_original_order,
+  Permutation_summary = permutation_summary,
+  Permutation_distribution = permutation_distribution
+)
+
+saveRDS(results_object, results_object_output)
+saveRDS(permutation_distribution, permutation_distribution_output)
+
+utils::write.csv(
+  global_result,
+  global_csv_output,
+  row.names = FALSE,
+  na = ""
+)
+
+utils::write.csv(
+  pairwise_results,
+  pairwise_csv_output,
+  row.names = FALSE,
+  na = ""
+)
+
+utils::write.csv(
+  correlation_long,
+  correlations_csv_output,
+  row.names = FALSE,
+  na = ""
+)
+
+workbook_sheets <- list(
+  Global_test = global_result,
+  Pairwise_differences = pairwise_results,
+  Pairwise_original_order = pairwise_original_order,
+  Permutation_summary = permutation_summary,
+  Control_matrix = control_matrix_table,
+  Stress_matrix = stress_matrix_table,
+  Difference_matrix = difference_matrix_table,
+  Correlations_long = correlation_long,
+  Author_Treatment_counts = author_treatment_counts,
+  Normalisation_audit = normalisation_audit,
+  Tie_diagnostics = tie_diagnostics
+)
+
+workbook <- openxlsx::createWorkbook()
+header_style <- openxlsx::createStyle(
+  textDecoration = "bold",
+  halign = "center",
+  valign = "center",
+  wrapText = TRUE
+)
+
+for (sheet_name in names(workbook_sheets)) {
+  sheet_data <- workbook_sheets[[sheet_name]]
+
+  if (!is.data.frame(sheet_data)) {
+    stop("Workbook sheet ", sheet_name, " is not a data frame.")
+  }
+
+  openxlsx::addWorksheet(workbook, sheet_name)
+  openxlsx::writeData(workbook, sheet = sheet_name, x = sheet_data)
+
+  if (ncol(sheet_data) > 0L) {
+    openxlsx::addStyle(
+      workbook,
+      sheet = sheet_name,
+      style = header_style,
+      rows = 1,
+      cols = seq_len(ncol(sheet_data)),
+      gridExpand = TRUE,
+      stack = TRUE
+    )
+    openxlsx::setColWidths(
+      workbook,
+      sheet = sheet_name,
+      cols = seq_len(ncol(sheet_data)),
+      widths = "auto"
+    )
+  }
+
+  openxlsx::freezePane(workbook, sheet = sheet_name, firstRow = TRUE)
+}
+
+openxlsx::saveWorkbook(workbook, workbook_output, overwrite = TRUE)
+
+capture.output(
+  utils::sessionInfo(),
+  file = session_info_output
+)
+
+# ------------------------------------------------------------
+# 11. Confirm output creation and identify legacy files
+# ------------------------------------------------------------
+
+expected_output_files <- c(
+  results_object_output,
+  permutation_distribution_output,
+  workbook_output,
+  global_csv_output,
+  pairwise_csv_output,
+  correlations_csv_output,
+  session_info_output
+)
+
+missing_output_files <- expected_output_files[
+  !file.exists(expected_output_files)
+]
+
+if (length(missing_output_files) > 0L) {
+  stop(
+    "The following expected output files were not created:\n",
+    paste(missing_output_files, collapse = "\n")
+  )
+}
+
+legacy_files <- c(
+  file.path(processed_dir, "population_control_stress_z.rds"),
+  file.path(
+    project_root,
+    "03_Results",
+    "Statistics",
+    "Correlation_Structure_Permutation.csv"
+  ),
+  file.path(objects_dir, "Correlation_Structure_Permutation.rds")
+)
+
+existing_legacy_files <- legacy_files[file.exists(legacy_files)]
+
+if (length(existing_legacy_files) > 0L) {
+  warning(
+    "Legacy files from the former mean/SD workflow were detected. ",
+    "They were not used or overwritten:\n",
+    paste(existing_legacy_files, collapse = "\n")
+  )
+}
+
+# ------------------------------------------------------------
+# 12. Final console audit
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("OBJECTIVE 2 - BEHAVIOURAL CORRELATION STRUCTURE\n")
+cat("============================================================\n")
+
+cat("\nIndependent populations:\n")
+print(group_counts, row.names = FALSE)
+
+cat(
+  "\nCorrected upstream data:\n",
+  "Traceability: ",
+  expected_traceability,
+  "\nNormalisation: ",
+  expected_normalisation,
+  "\n",
+  sep = ""
+)
+
+cat("\nAuthor-by-Treatment counts:\n")
+print(author_treatment_counts, row.names = FALSE)
+
+cat("\nAuthor-specific Control-reference robust-normalisation audit:\n")
+print(normalisation_audit, row.names = FALSE)
+
+cat("\nControl Spearman correlation matrix:\n")
+print(round(cor_control, 3))
+
+cat("\nStress Spearman correlation matrix:\n")
+print(round(cor_stress, 3))
+
+cat("\nStress-minus-Control correlation matrix:\n")
+print(round(difference_matrix, 3))
+
+cat("\nGlobal correlation-structure permutation test:\n")
+print(global_result, row.names = FALSE)
+
+cat("\nPairwise correlation differences:\n")
+print(pairwise_results, row.names = FALSE)
+
+cat("\nPermutation-null summary:\n")
+print(permutation_summary, row.names = FALSE)
+
+cat(
+  "\nMethodological note: the observed matrices contain Spearman ",
+  "correlations. The null distribution was generated by unrestricted ",
+  "permutation of pooled within-group standardised midrank scores, ",
+  "preserving 89 fish per independent group.\n",
+  sep = ""
+)
+
+cat(
+  "\nThe global test evaluates the six unique correlations jointly. ",
+  "Pairwise tests are secondary; MaxT controls the family-wise error ",
+  "rate across the six behavioural associations.\n",
+  sep = ""
+)
+
+cat(
+  "\nThis analysis does not use Louvain memberships because it ",
+  "evaluates correlation structure across the complete Control and ",
+  "Stress populations.\n",
+  sep = ""
+)
+
+cat("\nDefinitive corrected outputs saved as:\n")
+for (output_file in expected_output_files) {
+  cat(normalizePath(output_file, winslash = "/", mustWork = FALSE), "\n")
+}
+
+cat("============================================================\n")
