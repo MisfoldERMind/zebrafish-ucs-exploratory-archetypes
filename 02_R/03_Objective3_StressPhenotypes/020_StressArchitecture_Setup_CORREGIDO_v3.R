@@ -56,14 +56,7 @@ cat("\nRunning: ", script_version, "\n", sep = "")
 # 1. Project directory
 # ------------------------------------------------------------
 
-project_root <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+project_root <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(project_root)) {
   stop("Project directory not found:\n", project_root)
@@ -1004,3 +997,641 @@ if (
     "not one within tolerance."
   )
 }
+
+# ------------------------------------------------------------
+# 13. Extract Stress and verify exact corrected provenance
+# ------------------------------------------------------------
+
+stress <- population %>%
+  dplyr::filter(
+    Treatment == "Stress"
+  ) %>%
+  dplyr::arrange(
+    Author,
+    ID
+  )
+
+stress_reference <- stress_reference %>%
+  dplyr::filter(
+    Treatment == "Stress"
+  ) %>%
+  dplyr::arrange(
+    Author,
+    ID
+  )
+
+if (
+  nrow(stress) != expected_stress_n ||
+  nrow(stress_reference) != expected_stress_n
+) {
+  stop(
+    "Both corrected Stress objects must contain exactly 89 fish."
+  )
+}
+
+if (
+  !identical(
+    stress$Traceability_ID,
+    stress_reference$Traceability_ID
+  )
+) {
+  stop(
+    "The combined and standalone corrected Stress objects do not ",
+    "contain the same Author + ID keys."
+  )
+}
+
+if (
+  !identical(
+    as.character(stress$Treatment),
+    as.character(stress_reference$Treatment)
+  )
+) {
+  stop(
+    "Treatment labels differ between the corrected Stress objects."
+  )
+}
+
+columns_to_compare <- c(
+  behavioural_variables,
+  robust_variables
+)
+
+stress_provenance_differences <- vapply(
+  columns_to_compare,
+  function(variable_i) {
+    max(
+      abs(
+        stress[[variable_i]] -
+          stress_reference[[variable_i]]
+      )
+    )
+  },
+  numeric(1)
+)
+
+if (
+  any(
+    stress_provenance_differences >
+      recalculation_tolerance
+  )
+) {
+  stop(
+    "The Stress subset does not reproduce the standalone corrected ",
+    "Script 011 Stress object."
+  )
+}
+
+# ------------------------------------------------------------
+# 14. Construct definitive Objective 3 Stress dataset
+# ------------------------------------------------------------
+
+legacy_variables_present <- intersect(
+  legacy_variables,
+  names(stress)
+)
+
+stress_objective3 <- stress %>%
+  dplyr::select(
+    -dplyr::any_of(
+      legacy_variables
+    )
+  ) %>%
+  dplyr::mutate(
+    Author = as.character(Author),
+    ID = as.character(ID),
+    Traceability_ID =
+      make_traceability_key(
+        Author,
+        ID
+      ),
+    Treatment = factor(
+      as.character(Treatment),
+      levels = "Stress"
+    )
+  ) %>%
+  dplyr::arrange(
+    Author,
+    ID
+  )
+
+if (
+  nrow(stress_objective3) != expected_stress_n
+) {
+  stop(
+    "The definitive Objective 3 dataset does not contain 89 Stress fish."
+  )
+}
+
+if (
+  anyDuplicated(
+    stress_objective3$Traceability_ID
+  ) > 0L
+) {
+  stop(
+    "Duplicated Author + ID keys were generated in the Objective 3 dataset."
+  )
+}
+
+if (
+  !all(
+    as.character(stress_objective3$Treatment) == "Stress"
+  )
+) {
+  stop(
+    "The definitive Objective 3 dataset contains non-Stress observations."
+  )
+}
+
+# ------------------------------------------------------------
+# 15. Audit the four-dimensional Stress matrix
+# ------------------------------------------------------------
+
+stress_behavioural_matrix <- as.matrix(
+  stress_objective3[
+    robust_variables
+  ]
+)
+
+storage.mode(
+  stress_behavioural_matrix
+) <- "double"
+
+if (
+  any(
+    !is.finite(stress_behavioural_matrix)
+  )
+) {
+  stop(
+    "The Objective 3 four-dimensional Stress matrix contains ",
+    "non-finite values."
+  )
+}
+
+stress_variable_variances <- apply(
+  stress_behavioural_matrix,
+  2,
+  stats::var
+)
+
+if (
+  any(
+    !is.finite(stress_variable_variances)
+  ) ||
+  any(
+    stress_variable_variances <= 0
+  )
+) {
+  stop(
+    "At least one robust behavioural variable has zero or non-finite ",
+    "variance within Stress."
+  )
+}
+
+# Mean centring is used only for the mathematical rank audit.
+# It does not redefine or rescale the inherited robust coordinates.
+
+stress_matrix_centered <- sweep(
+  stress_behavioural_matrix,
+  MARGIN = 2,
+  STATS = colMeans(
+    stress_behavioural_matrix
+  ),
+  FUN = "-"
+)
+
+stress_matrix_rank <- qr(
+  stress_matrix_centered
+)$rank
+
+if (
+  stress_matrix_rank <
+    length(robust_variables)
+) {
+  stop(
+    "The centred four-dimensional Stress behavioural matrix is ",
+    "rank deficient."
+  )
+}
+
+number_duplicated_profiles <- sum(
+  duplicated(
+    as.data.frame(
+      stress_behavioural_matrix
+    )
+  )
+)
+
+# ------------------------------------------------------------
+# 16. Descriptive audit of the inherited Stress coordinates
+# ------------------------------------------------------------
+
+stress_robust_summary <- dplyr::bind_rows(
+  lapply(
+    robust_variables,
+    function(variable_i) {
+      x <- stress_objective3[[variable_i]]
+
+      tibble::tibble(
+        Variable = variable_i,
+        n = length(x),
+        Mean = mean(x),
+        SD = stats::sd(x),
+        Median = stats::median(x),
+        Q1 = as.numeric(
+          stats::quantile(
+            x,
+            probs = 0.25,
+            names = FALSE,
+            type = 7
+          )
+        ),
+        Q3 = as.numeric(
+          stats::quantile(
+            x,
+            probs = 0.75,
+            names = FALSE,
+            type = 7
+          )
+        ),
+        IQR = stats::IQR(x),
+        MAD_scaled = stats::mad(
+          x,
+          constant = mad_scale_constant
+        ),
+        Minimum = min(x),
+        Maximum = max(x)
+      )
+    }
+  )
+)
+
+# ------------------------------------------------------------
+# 17. Save definitive Objective 3 setup objects
+# ------------------------------------------------------------
+
+setup_object <- list(
+  Objective = "Objective 3",
+  Scientific_question = paste(
+    "What internal behavioural structure emerges within",
+    "the UCS-exposed population?"
+  ),
+  Operational_question = paste(
+    "What structure does the displaced UCS-exposed population",
+    "adopt internally within the Control-referenced behavioural space?"
+  ),
+  Analytical_population = "Stress only",
+  Stress_n = nrow(
+    stress_objective3
+  ),
+  Authors = population_authors,
+  Traceability = expected_traceability,
+  Clustering_scope =
+    "De novo within the Stress population",
+  Reference_space = paste(
+    "Common four-dimensional Control-referenced behavioural space;",
+    "robust coordinates fixed within Author before cohorts are pooled"
+  ),
+  Normalisation = expected_normalisation,
+  Normalisation_formula = paste(
+    "(x - Median_control_within_Author) /",
+    "(1.4826 * MAD_raw_control_within_Author)"
+  ),
+  Behavioural_variables =
+    behavioural_variables,
+  Robust_variables =
+    robust_variables,
+  Source_population_file =
+    population_input,
+  Source_stress_file =
+    stress_reference_input,
+  Source_normalisation_parameters_file =
+    normalisation_parameters_input,
+  Source_normalisation_audit_file =
+    normalisation_audit_input,
+  Objective2_dependency_checks = list(
+    Raw_control_reference_match_by_Author_ID =
+      objective2_audit[[
+        "Raw_control_reference_match_by_Author_ID"
+      ]],
+    Objective1_normalised_control_match_by_Author_ID =
+      objective2_audit[[
+        "Objective1_normalised_control_match_by_Author_ID"
+      ]],
+    Objective1_parameter_match =
+      objective2_audit[[
+        "Objective1_parameter_match"
+      ]]
+  ),
+  Group_counts = group_counts,
+  Cohort_group_counts =
+    cohort_group_counts,
+  Normalisation_parameters =
+    normalisation_parameters,
+  Author_group_variable_normalisation_validation =
+    normalisation_validation,
+  Stress_provenance_maximum_absolute_differences =
+    stress_provenance_differences,
+  Stress_matrix_rank =
+    stress_matrix_rank,
+  Stress_variable_variances =
+    stress_variable_variances,
+  Duplicated_robust_profiles =
+    number_duplicated_profiles,
+  Legacy_variables_removed =
+    legacy_variables_present,
+  Stress_robust_summary =
+    stress_robust_summary,
+  Downstream_constraint = paste(
+    "PCA and Louvain must operate directly on the four inherited",
+    "*_rz coordinates without any additional scaling or",
+    "Stress-specific normalisation."
+  )
+)
+
+saveRDS(
+  stress_objective3,
+  stress_output
+)
+
+saveRDS(
+  setup_object,
+  setup_output
+)
+
+utils::write.csv(
+  normalisation_validation,
+  normalisation_validation_output,
+  row.names = FALSE,
+  na = ""
+)
+
+utils::write.csv(
+  stress_robust_summary,
+  stress_summary_output,
+  row.names = FALSE,
+  na = ""
+)
+
+capture.output(
+  utils::sessionInfo(),
+  file = session_info_output
+)
+
+# ------------------------------------------------------------
+# 18. Confirm output creation
+# ------------------------------------------------------------
+
+expected_output_files <- c(
+  stress_output,
+  setup_output,
+  normalisation_validation_output,
+  stress_summary_output,
+  session_info_output
+)
+
+missing_output_files <- expected_output_files[
+  !file.exists(
+    expected_output_files
+  )
+]
+
+if (length(missing_output_files) > 0L) {
+  stop(
+    "The following expected Objective 3 setup outputs were not created:\n",
+    paste(
+      missing_output_files,
+      collapse = "\n"
+    )
+  )
+}
+
+# ------------------------------------------------------------
+# 19. Identify obsolete files from former workflows
+# ------------------------------------------------------------
+
+legacy_files <- c(
+  file.path(
+    processed_dir,
+    "population_control_stress_z.rds"
+  ),
+  file.path(
+    processed_dir,
+    "stress_objective3.rds"
+  )
+)
+
+existing_legacy_files <- legacy_files[
+  file.exists(
+    legacy_files
+  )
+]
+
+if (
+  length(
+    existing_legacy_files
+  ) > 0L
+) {
+  warning(
+    "Legacy files from former mean/SD-standardised workflows were ",
+    "detected. They were NOT used or overwritten and must not enter ",
+    "the corrected Objective 3 workflow:\n",
+    paste(
+      existing_legacy_files,
+      collapse = "\n"
+    )
+  )
+}
+
+# ------------------------------------------------------------
+# 20. Final console audit
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("OBJECTIVE 3 - CORRECTED STRESS ARCHITECTURE SETUP\n")
+cat("============================================================\n")
+
+cat(
+  "\nScientific question:\n",
+  setup_object$Scientific_question,
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nOperational question:\n",
+  setup_object$Operational_question,
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nAnalytical population: Stress only (n = ",
+  nrow(stress_objective3),
+  ").\n",
+  sep = ""
+)
+
+cat(
+  "Traceability: ",
+  expected_traceability,
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Authors/cohorts retained: ",
+  paste(
+    population_authors,
+    collapse = ", "
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nInherited coordinate system:\n",
+  expected_normalisation,
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Reference population: ",
+  expected_reference_population,
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nObjective 1 -> Objective 2 dependency audit flags:\n",
+  "- Raw Control reference match by Author + ID: TRUE\n",
+  "- Objective 1 normalised Control match by Author + ID: TRUE\n",
+  "- Objective 1 Author-specific parameter match: TRUE\n",
+  sep = ""
+)
+
+cat(
+  "\nGroup counts inherited from corrected Objective 2:\n"
+)
+
+print(
+  group_counts,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nAuthor x Treatment counts:\n"
+)
+
+print(
+  cohort_group_counts,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nAuthor-specific Control-reference parameters (16 rows expected):\n"
+)
+
+print(
+  tibble::as_tibble(normalisation_parameters),
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nAuthor x Group x Variable reconstruction audit ",
+  "(32 rows expected):\n",
+  sep = ""
+)
+
+print(
+  normalisation_validation,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nControl anchor check: within every Author, median ~= 0 and ",
+  "scaled MAD ~= 1.\n",
+  sep = ""
+)
+
+cat(
+  "\nStress robust descriptive summary after inherited cohort-wise ",
+  "normalisation:\n",
+  sep = ""
+)
+
+print(
+  stress_robust_summary,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nStress centred behavioural-matrix rank: ",
+  stress_matrix_rank,
+  " of ",
+  length(robust_variables),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Exact duplicated four-variable Stress profiles: ",
+  number_duplicated_profiles,
+  "\n",
+  sep = ""
+)
+
+if (
+  length(
+    legacy_variables_present
+  ) > 0L
+) {
+  cat(
+    "\nLegacy mean/SD variables excluded from the definitive ",
+    "Objective 3 dataset:\n",
+    paste(
+      legacy_variables_present,
+      collapse = ", "
+    ),
+    "\n",
+    sep = ""
+  )
+}
+
+cat(
+  "\nMethodological constraint for downstream Objective 3 scripts:\n",
+  "- Use the 89 Stress fish only for de novo internal-structure discovery.\n",
+  "- Retain Author + ID traceability.\n",
+  "- Use distance_rz, crossing_rz, top_entry_rz and top_time_rz unchanged.\n",
+  "- Do not apply global scaling, Stress-specific scaling, or scale().\n",
+  "- Do not import Control Higher-/Lower-exploration memberships into ",
+  "the Stress clustering.\n",
+  "- Do not assign resilient-like/susceptible-like labels before ",
+  "community detection, stability assessment and behavioural ",
+  "characterisation.\n",
+  sep = ""
+)
+
+cat(
+  "\nDefinitive corrected Objective 3 setup outputs saved as:\n"
+)
+
+for (output_file in expected_output_files) {
+  cat(
+    normalizePath(
+      output_file,
+      winslash = "/",
+      mustWork = FALSE
+    ),
+    "\n",
+    sep = ""
+  )
+}
+
+cat("\n============================================================\n")
