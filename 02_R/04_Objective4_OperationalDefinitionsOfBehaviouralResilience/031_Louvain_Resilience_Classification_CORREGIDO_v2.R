@@ -52,14 +52,7 @@ cat("\nRunning: ", script_version, "\n", sep = "")
 # 1. Project directory and packages
 # ------------------------------------------------------------
 
-project_root <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+project_root <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(project_root)) {
   stop("Project directory not found:\n", project_root)
@@ -1005,3 +998,198 @@ openxlsx::write.xlsx(
 
     Raw_cluster_sizes =
       cluster_size_audit,
+
+    Community_summary =
+      louvain_community_summary,
+
+    Community_order =
+      louvain_order,
+
+    Class_summary =
+      louvain_class_summary,
+
+    Classification =
+      classification_export,
+
+    Five_method_sizes =
+      method_size_table
+  ),
+  file =
+    xlsx_output,
+  overwrite = TRUE
+)
+
+# ------------------------------------------------------------
+# 16. Save corrected Objective 4 Louvain objects
+# ------------------------------------------------------------
+
+saveRDS(
+  stress_louvain_o4,
+  classification_output
+)
+
+saveRDS(
+  louvain_community_summary,
+  community_summary_output
+)
+
+saveRDS(
+  louvain_class_summary,
+  class_summary_output
+)
+
+saveRDS(
+  louvain_order,
+  community_order_output
+)
+
+saveRDS(
+  method_size_table,
+  method_size_output
+)
+
+capture.output(
+  utils::sessionInfo(),
+  file =
+    session_info_output
+)
+
+# ------------------------------------------------------------
+# 17. Confirm outputs
+# ------------------------------------------------------------
+
+expected_output_files <- c(
+  classification_output,
+  community_summary_output,
+  class_summary_output,
+  community_order_output,
+  method_size_output,
+  xlsx_output,
+  pc_pdf_output,
+  pc_tiff_output,
+  index_pdf_output,
+  index_tiff_output,
+  session_info_output
+)
+
+missing_output_files <- expected_output_files[
+  !file.exists(expected_output_files)
+]
+
+if (length(missing_output_files) > 0L) {
+  stop(
+    "The following corrected Louvain outputs were not created:\n",
+    paste(missing_output_files, collapse = "\n")
+  )
+}
+
+# ------------------------------------------------------------
+# 18. Final console audit
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("OBJECTIVE 4 - LOUVAIN OPERATIONAL CLASSIFICATION\n")
+cat("============================================================\n")
+
+cat("\nDefinitive Objective 3 source:\n")
+cat(objective3_characterisation_file, "\n")
+
+cat("\nSelected Louvain configuration source:\n")
+cat(objective3_selected_louvain_file, "\n")
+
+cat("\nStress fish:\n")
+print(nrow(stress_louvain_o4))
+
+cat("\nFish per Author:\n")
+print(
+  table(
+    stress_louvain_o4$Author,
+    useNA = "ifany"
+  )
+)
+
+cat("\nDuplicate Author + ID combinations:\n")
+print(
+  sum(
+    duplicated(
+      stress_louvain_o4[c("Author", "ID")]
+    )
+  )
+)
+
+cat("\nMaximum absolute difference from definitive Objective 3 robust coordinates:\n")
+print(
+  stress_provenance_difference
+)
+
+cat("\nMaximum absolute difference between Objective 3 Louvain data and definitive robust coordinates:\n")
+print(
+  louvain_robust_difference
+)
+
+cat(
+  "\nPCA coordinate systems:\n",
+  "Objective 3 de novo Stress PCA scores were not compared with the ",
+  "Control-derived Objective 1 PCA scores because they are distinct PCA spaces.\n",
+  "Objective 4 PC1-PC4 and Behavioural_Index were inherited from the ",
+  "corrected Control-derived PCA workflow.\n",
+  sep = ""
+)
+
+cat("\nDefinitive Objective 3 Louvain configuration:\n")
+cat("Selected k: ", expected_selected_k, "\n", sep = "")
+cat(
+  "Stable two-cluster plateau: k = ",
+  expected_plateau_start,
+  "–",
+  expected_plateau_end,
+  "\n",
+  sep = ""
+)
+
+cat("\nOriginal de novo Louvain cluster sizes:\n")
+print(
+  cluster_size_audit,
+  n = Inf,
+  width = Inf
+)
+
+cat("\nLouvain clusters ordered by Behavioural_Index:\n")
+print(
+  louvain_community_summary,
+  n = Inf,
+  width = Inf
+)
+
+cat("\nHarmonised Louvain classification:\n")
+print(
+  table(
+    stress_louvain_o4$Louvain_Class,
+    useNA = "ifany"
+  )
+)
+
+cat("\nLouvain class summary:\n")
+print(
+  louvain_class_summary,
+  n = Inf,
+  width = Inf
+)
+
+cat("\nFive-method size table:\n")
+print(
+  method_size_table,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nNo Louvain clustering was recalculated in Objective 4.\n",
+  "The definitive de novo Objective 3 partition was inherited unchanged.\n",
+  "The Control-derived reference-profile refinement from Objective 3 was NOT ",
+  "used to redefine this pure Louvain classifier.\n",
+  sep = ""
+)
+
+cat("\nOutputs saved successfully.\n")
+cat("\n============================================================\n")
