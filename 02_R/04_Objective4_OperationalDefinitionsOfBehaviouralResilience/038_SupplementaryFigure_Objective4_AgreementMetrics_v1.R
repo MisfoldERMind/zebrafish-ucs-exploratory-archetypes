@@ -31,14 +31,7 @@
 # 0. Project directory
 # ------------------------------------------------------------
 
-project_root <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+project_root <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(project_root)) {
   stop(
@@ -288,7 +281,7 @@ theme_manuscript <- function() {
 
       plot.tag.position = c(
         0.12,
-        1
+        0.96
       )
     )
 }
@@ -733,9 +726,9 @@ supplementary_figure <- supplementary_figure +
   patchwork::plot_annotation(
     theme = ggplot2::theme(
       plot.margin = ggplot2::margin(
-        t = 0.50,
+        t = 0,
         r = 30,
-        b = 0,
+        b = -30,
         l = 0,
         unit = "pt"
       )
@@ -841,7 +834,7 @@ saveRDS(
 ggplot2::ggsave(
   filename = figure_pdf_output,
   plot = supplementary_figure,
-  width = 17.0,
+  width = 17.42,
   height = 5.8,
   units = "in",
   device = grDevices::cairo_pdf,
@@ -851,7 +844,7 @@ ggplot2::ggsave(
 ggplot2::ggsave(
   filename = figure_tiff_output,
   plot = supplementary_figure,
-  width = 17.0,
+  width = 17.42,
   height = 5.8,
   units = "in",
   dpi = 600,
@@ -862,7 +855,7 @@ ggplot2::ggsave(
 ggplot2::ggsave(
   filename = figure_png_output,
   plot = supplementary_figure,
-  width = 17.0,
+  width = 17.42,
   height = 5.8,
   units = "in",
   dpi = 600,
