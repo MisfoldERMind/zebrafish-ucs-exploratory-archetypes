@@ -27,14 +27,7 @@
 # 0. Project directory
 # ------------------------------------------------------------
 
-project_root <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+project_root <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(project_root)) {
   stop(
@@ -609,7 +602,7 @@ panel_a_plot_data <- panel_a_data %>%
 colourbar_bottom <- 1.45
 colourbar_top <- 3.75
 colourbar_xmin <- 5.64
-colourbar_xmax <- 5.72
+colourbar_xmax <- 5.94
 
 colourbar_breaks <- c(
   0,
@@ -1005,3 +998,492 @@ make_consensus_violin <- function(
       alpha = 0.20,
       linewidth = 0.75,
       show.legend = FALSE
+    ) +
+
+    ggplot2::geom_boxplot(
+      data = profile_data,
+      mapping = ggplot2::aes(
+        x = Consensus_x,
+        y = .data[[variable_name]],
+        group = Consensus_Category,
+        fill = Consensus_Category
+      ),
+      width = 0.22,
+      outlier.shape = NA,
+      alpha = 0.72,
+      colour = "black",
+      linewidth = 0.60,
+      show.legend = FALSE
+    ) +
+
+    ggplot2::geom_point(
+      data = profile_data,
+      mapping = ggplot2::aes(
+        x = Jitter_x,
+        y = .data[[variable_name]],
+        fill = Consensus_Category
+      ),
+      shape = 21,
+      size = 1.65,
+      stroke = 0.34,
+      alpha = 0.78,
+      colour = "black",
+      show.legend = FALSE
+    ) +
+
+    ggplot2::scale_fill_manual(
+      values = consensus_colours,
+      breaks = consensus_order,
+      drop = FALSE
+    ) +
+
+    ggplot2::scale_colour_manual(
+      values = consensus_colours,
+      breaks = consensus_order,
+      drop = FALSE
+    ) +
+
+    ggplot2::scale_x_continuous(
+      breaks = 1:5,
+      labels = unname(
+        consensus_labels[
+          consensus_order
+        ]
+      ),
+      expand = ggplot2::expansion(
+        mult = c(
+          0,
+          0
+        )
+      )
+    ) +
+
+    ggplot2::labs(
+      tag = if (
+        add_panel_tag
+      ) {
+        "C"
+      } else {
+        NULL
+      },
+      title = variable_label,
+      x = NULL,
+      y = NULL
+    ) +
+
+    {
+      if (show_y_title) {
+
+        variable_range <- range(
+          profile_data[[variable_name]],
+          na.rm = TRUE
+        )
+
+        variable_midpoint <- mean(
+          variable_range
+        )
+
+        ggplot2::annotate(
+          "text",
+          x = 0.05,
+          y = variable_midpoint,
+          label = "Control-referenced robust behavioural value",
+          angle = 90,
+          family = "Arial",
+          size = 3.40,
+          hjust = 0.5,
+          vjust = 0.5
+        )
+
+      } else {
+
+        NULL
+      }
+    } +
+
+    ggplot2::coord_cartesian(
+      xlim = c(
+        0.55,
+        5.45
+      ),
+      clip = "off"
+    ) +
+
+    theme_manuscript() +
+
+    ggplot2::theme(
+      legend.position = "none",
+      axis.text.x = ggplot2::element_text(
+        size = 7.4,
+        lineheight = 0.88,
+        angle = 32,
+        hjust = 1,
+        vjust = 1
+      ),
+      axis.text.y = ggplot2::element_text(
+        size = 8.8,
+        margin = ggplot2::margin(
+          r = 1
+        )
+      ),
+      axis.title.y = ggplot2::element_blank(),
+      plot.title = ggplot2::element_text(
+        family = "Arial",
+        face = "plain",
+        size = 10.3,
+        hjust = 0.5,
+        margin = ggplot2::margin(
+          b = 5
+        )
+      ),
+      plot.margin = ggplot2::margin(
+        t = 8,
+        r = 5,
+        b = 8,
+        l = if (
+          show_y_title
+        ) {
+          8
+        } else {
+          2
+        }
+      )
+    )
+
+  current_plot
+}
+
+
+# ------------------------------------------------------------
+# 16. Build the four Panel C distributions
+# ------------------------------------------------------------
+
+panel_c_distance <- make_consensus_violin(
+  variable_name = "distance_rz",
+  variable_label = "Distance travelled",
+  show_y_title = TRUE,
+  add_panel_tag = FALSE
+)
+
+panel_c_crossing <- make_consensus_violin(
+  variable_name = "crossing_rz",
+  variable_label = "Line crossings",
+  show_y_title = FALSE,
+  add_panel_tag = FALSE
+)
+
+panel_c_entry <- make_consensus_violin(
+  variable_name = "top_entry_rz",
+  variable_label = "Upper-zone entries",
+  show_y_title = FALSE,
+  add_panel_tag = FALSE
+)
+
+panel_c_time <- make_consensus_violin(
+  variable_name = "top_time_rz",
+  variable_label = "Upper-zone time",
+  show_y_title = FALSE,
+  add_panel_tag = FALSE
+)
+
+panel_c_label <- patchwork::wrap_elements(
+  full = grid::textGrob(
+    "C",
+    x = grid::unit(0.70, "npc"),
+    y = grid::unit(0.985, "npc"),
+    just = c("left", "top"),
+    gp = grid::gpar(
+      fontfamily = "Arial",
+      fontsize = 16,
+      fontface = "bold",
+      col = "black"
+    )
+  )
+)
+
+panel_c <- patchwork::wrap_plots(
+  panel_c_label,
+  panel_c_distance,
+  panel_c_crossing,
+  panel_c_entry,
+  panel_c_time,
+  nrow = 1,
+  widths = c(
+    0.030,
+    1,
+    1,
+    1,
+    1
+  )
+)
+
+
+# ------------------------------------------------------------
+# 17. Assemble Main Figure 4
+# ------------------------------------------------------------
+# Layout refinements requested by the user:
+# - Panel A colour bar moved closer to the heatmap.
+# - Panel C y-axis title moved closer to the y-axis.
+
+top_row <- patchwork::wrap_plots(
+  panel_a,
+  panel_b,
+  nrow = 1,
+  widths = c(
+    1.08,
+    1.02
+  )
+)
+
+figure4_main <- patchwork::wrap_plots(
+  top_row,
+  panel_c,
+  ncol = 1,
+  heights = c(
+    1.00,
+    0.92
+  )
+)
+
+figure4_main <- figure4_main +
+  patchwork::plot_annotation(
+    theme = ggplot2::theme(
+      plot.margin = ggplot2::margin(
+        t = 0,
+        r = 0,
+        b = 0,
+        l = -50,
+        unit = "pt"
+      )
+    )
+  )
+
+# ------------------------------------------------------------
+# 18. Display
+# ------------------------------------------------------------
+
+print(
+  figure4_main
+)
+
+
+# ------------------------------------------------------------
+# 19. Output paths
+# ------------------------------------------------------------
+
+figure_pdf_output <- file.path(
+  figures_dir,
+  "Figure4_Main_MethodComparison_ConsensusProfiles_v15.pdf"
+)
+
+figure_tiff_output <- file.path(
+  figures_dir,
+  "Figure4_Main_MethodComparison_ConsensusProfiles_v15.tiff"
+)
+
+figure_png_output <- file.path(
+  figures_dir,
+  "Figure4_Main_MethodComparison_ConsensusProfiles_v15.png"
+)
+
+figure_object_output <- file.path(
+  objects_dir,
+  "figure4_main_method_comparison_consensus_profiles_v15_plot.rds"
+)
+
+figure_data_output <- file.path(
+  objects_dir,
+  "figure4_main_method_comparison_consensus_profiles_v15_data.rds"
+)
+
+session_info_output <- file.path(
+  objects_dir,
+  "figure4_main_method_comparison_consensus_profiles_v15_sessionInfo.txt"
+)
+
+
+# ------------------------------------------------------------
+# 20. Save reproducibility objects
+# ------------------------------------------------------------
+
+figure_data_object <- list(
+  Figure =
+    "Main Figure 4",
+  Upstream_objects = list(
+    Kappa_matrix =
+      kappa_file,
+    Method_size_table =
+      method_size_file,
+    Consensus_profile_data =
+      profile_file
+  ),
+  Palette = list(
+    Turquoise =
+      colour_turquoise,
+    Coral =
+      colour_coral,
+    Intermediate_grey =
+      colour_grey_intermediate,
+    High_consensus_resilient =
+      colour_resilient_high,
+    High_consensus_susceptible =
+      colour_susceptible_high
+  ),
+  Method_order =
+    method_order,
+  Consensus_order =
+    consensus_order,
+  Panel_A_data =
+    panel_a_data,
+  Panel_B_data =
+    panel_b_data,
+  Consensus_counts =
+    consensus_counts,
+  Panel_C_profile_data =
+    profile_data,
+  Jitter_seed =
+    jitter_seed
+)
+
+saveRDS(
+  figure4_main,
+  figure_object_output
+)
+
+saveRDS(
+  figure_data_object,
+  figure_data_output
+)
+
+
+# ------------------------------------------------------------
+# 21. Export figure
+# ------------------------------------------------------------
+
+ggplot2::ggsave(
+  filename = figure_pdf_output,
+  plot = figure4_main,
+  width = 14.0,
+  height = 9.0,
+  units = "in",
+  device = grDevices::cairo_pdf,
+  bg = "white"
+)
+
+ggplot2::ggsave(
+  filename = figure_tiff_output,
+  plot = figure4_main,
+  width = 14.0,
+  height = 9.0,
+  units = "in",
+  dpi = 600,
+  compression = "lzw",
+  bg = "white"
+)
+
+ggplot2::ggsave(
+  filename = figure_png_output,
+  plot = figure4_main,
+  width = 14.0,
+  height = 9.0,
+  units = "in",
+  dpi = 600,
+  bg = "white"
+)
+
+capture.output(
+  utils::sessionInfo(),
+  file = session_info_output
+)
+
+
+# ------------------------------------------------------------
+# 22. Confirm outputs
+# ------------------------------------------------------------
+
+expected_outputs <- c(
+  figure_pdf_output,
+  figure_tiff_output,
+  figure_png_output,
+  figure_object_output,
+  figure_data_output,
+  session_info_output
+)
+
+missing_outputs <- expected_outputs[
+  !file.exists(expected_outputs)
+]
+
+if (length(missing_outputs) > 0L) {
+  stop(
+    "The following Figure 4 outputs were not created:\n",
+    paste(missing_outputs, collapse = "\n")
+  )
+}
+
+
+# ------------------------------------------------------------
+# 23. Final console audit
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("MAIN FIGURE 4 - METHOD COMPARISON AND CONSENSUS PROFILES\n")
+cat("============================================================\n")
+
+cat(
+  "\nNo classification, consensus category, Cohen's kappa value, ",
+  "or behavioural score was recalculated in this script.\n",
+  sep = ""
+)
+
+cat("\nDefinitive upstream objects:\n")
+
+for (input_file_i in required_input_files) {
+  cat(
+    normalizePath(
+      input_file_i,
+      winslash = "/",
+      mustWork = FALSE
+    ),
+    "\n",
+    sep = ""
+  )
+}
+
+cat("\nConsensus-category counts inherited from Script 034/035:\n")
+
+print(
+  consensus_counts,
+  n = Inf,
+  width = Inf
+)
+
+cat("\nMethod-size table inherited from Script 034:\n")
+
+print(
+  panel_b_data %>%
+    dplyr::select(
+      Method,
+      Classification,
+      n,
+      Percentage
+    ),
+  n = Inf,
+  width = Inf
+)
+
+cat("\nFiles saved as:\n")
+
+for (output_file_i in expected_outputs) {
+  cat(
+    normalizePath(
+      output_file_i,
+      winslash = "/",
+      mustWork = FALSE
+    ),
+    "\n",
+    sep = ""
+  )
+}
+
+cat("\n============================================================\n")
