@@ -22,14 +22,7 @@
 # 1. Project directory
 # ------------------------------------------------------------
 
-project_root <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+project_root <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(project_root)) {
   stop(
@@ -1005,3 +998,352 @@ summarise_robust_variable <- function(
         values,
         probs = 0.75,
         names = FALSE,
+        type = 7
+      )
+    ),
+    IQR = stats::IQR(values),
+    MAD_scaled = stats::mad(
+      values,
+      center = centre,
+      constant = mad_scale_constant
+    ),
+    Minimum = min(values),
+    Maximum = max(values)
+  )
+}
+
+normalisation_audit <- dplyr::bind_rows(
+  lapply(
+    required_treatments,
+    function(group_i) {
+      dplyr::bind_rows(
+        lapply(
+          control_authors,
+          function(author_i) {
+            dplyr::bind_rows(
+              lapply(
+                behavioural_variables,
+                function(variable_i) {
+                  summarise_robust_variable(
+                    data_frame = population_control_stress_robust_z,
+                    group_name = group_i,
+                    author_name = author_i,
+                    original_variable = variable_i
+                  )
+                }
+              )
+            )
+          }
+        )
+      )
+    }
+  )
+) %>%
+  dplyr::left_join(
+    parameters,
+    by = c("Author", "Variable"),
+    suffix = c("_observed", "_parameter")
+  )
+
+expected_audit_n <- length(required_treatments) *
+  expected_parameter_n
+
+if (nrow(normalisation_audit) != expected_audit_n) {
+  stop(
+    "The Author x group x variable audit must contain ",
+    expected_audit_n,
+    " rows; found ",
+    nrow(normalisation_audit),
+    "."
+  )
+}
+
+control_audit_check <- normalisation_audit %>%
+  dplyr::filter(
+    Group == "Control"
+  )
+
+if (
+  any(
+    abs(control_audit_check$Median_observed) >
+    normalisation_tolerance
+  )
+) {
+  stop(
+    "At least one Author x variable transformed-control median is not ",
+    "zero within tolerance."
+  )
+}
+
+if (
+  any(
+    abs(control_audit_check$MAD_scaled_observed - 1) >
+    normalisation_tolerance
+  )
+) {
+  stop(
+    "At least one Author x variable transformed-control scaled MAD is ",
+    "not one within tolerance."
+  )
+}
+
+# Overall population summaries are descriptive after the mandatory
+# cohort-wise transformation. They are not used to renormalise data.
+
+population_summary <- dplyr::bind_rows(
+  lapply(
+    required_treatments,
+    function(group_i) {
+      group_rows <-
+        as.character(
+          population_control_stress_robust_z$Treatment
+        ) == group_i
+
+      dplyr::bind_rows(
+        lapply(
+          behavioural_variables,
+          function(variable_i) {
+            robust_variable_i <- paste0(variable_i, "_rz")
+            values <- population_control_stress_robust_z[[
+              robust_variable_i
+            ]]
+            values <- values[group_rows]
+            centre <- stats::median(values)
+
+            tibble::tibble(
+              Group = group_i,
+              Variable = variable_i,
+              n = length(values),
+              Mean = mean(values),
+              SD = stats::sd(values),
+              Median = centre,
+              MAD_scaled = stats::mad(
+                values,
+                center = centre,
+                constant = mad_scale_constant
+              ),
+              Minimum = min(values),
+              Maximum = max(values)
+            )
+          }
+        )
+      )
+    }
+  )
+)
+
+group_counts <- population_control_stress_robust_z %>%
+  dplyr::count(
+    Treatment,
+    name = "n"
+  ) %>%
+  dplyr::arrange(
+    Treatment
+  )
+
+cohort_group_counts <- population_control_stress_robust_z %>%
+  dplyr::mutate(
+    Author = as.character(Author)
+  ) %>%
+  dplyr::count(
+    Author,
+    Treatment,
+    name = "n"
+  ) %>%
+  dplyr::arrange(
+    Author,
+    Treatment
+  )
+
+if (
+  nrow(group_counts) != 2L ||
+  !identical(
+    as.character(group_counts$Treatment),
+    required_treatments
+  ) ||
+  !identical(
+    group_counts$n,
+    c(expected_control_n, expected_stress_n)
+  )
+) {
+  stop(
+    "The final object does not contain the expected 89 Control and 89 ",
+    "Stress fish."
+  )
+}
+
+# ------------------------------------------------------------
+# 12. Save definitive corrected Objective 2 objects
+# ------------------------------------------------------------
+
+normalisation_object <- list(
+  Objective = "Objective 2",
+  Reference_population = "Control within each Author",
+  Comparison_design = "Independent Control and Stress populations",
+  Method = "Author-specific control-referenced robust z-score",
+  Formula = paste0(
+    "(x - Median_control_Author) / ",
+    "(1.4826 * MAD_raw_control_Author)"
+  ),
+  MAD_scale_constant = mad_scale_constant,
+  Source_population_file = raw_population_file,
+  Source_control_reference_file = definitive_control_file,
+  Source_objective1_parameters_file = objective1_parameters_file,
+  Source_objective1_control_normalised_file =
+    objective1_control_normalised_file,
+  Control_n = nrow(control_robust_z),
+  Stress_n = nrow(stress_robust_z),
+  Authors = control_authors,
+  Behavioural_variables = behavioural_variables,
+  Robust_variables = robust_variables,
+  Parameters = parameters
+)
+
+saveRDS(
+  control_robust_z,
+  control_output
+)
+
+saveRDS(
+  stress_robust_z,
+  stress_output
+)
+
+saveRDS(
+  population_control_stress_robust_z,
+  population_output
+)
+
+saveRDS(
+  normalisation_object,
+  parameters_output
+)
+
+saveRDS(
+  list(
+    Group_counts = group_counts,
+    Cohort_group_counts = cohort_group_counts,
+    Normalisation_parameters = parameters,
+    Normalisation_audit = normalisation_audit,
+    Population_summary = population_summary,
+    Raw_control_reference_match_by_Author_ID = TRUE,
+    Objective1_normalised_control_match_by_Author_ID = TRUE,
+    Objective1_parameter_match = TRUE
+  ),
+  audit_output
+)
+
+utils::write.csv(
+  normalisation_audit,
+  audit_csv_output,
+  row.names = FALSE,
+  na = ""
+)
+
+utils::write.csv(
+  population_summary,
+  summary_csv_output,
+  row.names = FALSE,
+  na = ""
+)
+
+capture.output(
+  utils::sessionInfo(),
+  file = session_info_output
+)
+
+# ------------------------------------------------------------
+# 13. Confirm that every expected output was created
+# ------------------------------------------------------------
+
+expected_output_files <- c(
+  control_output,
+  stress_output,
+  population_output,
+  parameters_output,
+  audit_output,
+  audit_csv_output,
+  summary_csv_output,
+  session_info_output
+)
+
+missing_output_files <- expected_output_files[
+  !file.exists(expected_output_files)
+]
+
+if (length(missing_output_files) > 0L) {
+  stop(
+    "The following expected output files were not created:\n",
+    paste(missing_output_files, collapse = "\n")
+  )
+}
+
+# ------------------------------------------------------------
+# 14. Final console audit
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("OBJECTIVE 2 - AUTHOR-REFERENCED ROBUST NORMALISATION\n")
+cat("============================================================\n")
+
+cat("\nIndependent populations:\n")
+print(
+  group_counts,
+  n = Inf,
+  width = Inf
+)
+
+cat("\nPopulation sizes by Author and treatment:\n")
+print(
+  cohort_group_counts,
+  n = Inf,
+  width = Inf
+)
+
+cat("\nObjective 1 parameters used unchanged (Author x variable):\n")
+print(
+  tibble::as_tibble(parameters),
+  n = Inf,
+  width = Inf
+)
+
+cat("\nControl normalisation audit by Author x variable:\n")
+print(
+  control_audit_check,
+  n = Inf,
+  width = Inf
+)
+
+cat("\nDescriptive summaries after cohort-wise normalisation:\n")
+print(
+  population_summary,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nValidated dependencies:\n",
+  "- Control in LAPCOM_raw.rds equals control.rds by Author + ID.\n",
+  "- The 16 saved Objective 1 parameters were reproduced exactly.\n",
+  "- Recalculated controls equal objective1_control_robust_z.rds ",
+  "by Author + ID.\n",
+  "- The same Author-specific parameters were applied to Control ",
+  "and Stress.\n",
+  sep = ""
+)
+
+cat(
+  "\nDefinitive corrected objects saved as:\n",
+  paste(
+    normalizePath(
+      expected_output_files,
+      winslash = "/",
+      mustWork = FALSE
+    ),
+    collapse = "\n"
+  ),
+  "\n",
+  sep = ""
+)
+
+cat("\n============================================================\n")
