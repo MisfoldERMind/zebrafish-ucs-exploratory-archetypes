@@ -33,14 +33,7 @@
 # 1. Project directory
 # ------------------------------------------------------------
 
-base_dir <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+base_dir <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(base_dir)) {
   stop("Project directory not found:\n", base_dir)
@@ -1005,3 +998,875 @@ for (i in seq_len(length(k_values) - 1L)) {
 adjacent_k_stability <- tibble::tibble(
   Previous_k = k_values[-length(k_values)],
   k = k_values[-1L],
+  Previous_clusters = results_by_k$Clusters[-nrow(results_by_k)],
+  Clusters = results_by_k$Clusters[-1L],
+  Same_community_count = Previous_clusters == Clusters,
+  ARI_to_previous_k = vapply(
+    seq.int(2L, length(k_values)),
+    function(k_position) {
+      pairwise_k_ari_matrix[k_position - 1L, k_position]
+    },
+    numeric(1)
+  )
+) %>%
+  dplyr::mutate(
+    Exact_partition_equivalence =
+      ARI_to_previous_k >= 1 - exact_ari_tolerance,
+    High_adjacent_stability =
+      Same_community_count &
+      ARI_to_previous_k >= adjacent_ari_threshold
+  )
+
+results_by_k <- results_by_k %>%
+  dplyr::left_join(
+    adjacent_k_stability %>%
+      dplyr::select(k, ARI_to_previous_k),
+    by = "k"
+  )
+
+results_by_k <- results_by_k %>%
+  dplyr::mutate(
+    ARI_to_next_k = c(
+      adjacent_k_stability$ARI_to_previous_k,
+      NA_real_
+    ),
+    Minimum_local_adjacent_ARI = vapply(
+      seq_len(nrow(results_by_k)),
+      function(row_i) {
+        local_values <- c(
+          ARI_to_previous_k[row_i],
+          ARI_to_next_k[row_i]
+        )
+
+        local_values <- local_values[is.finite(local_values)]
+
+        if (length(local_values) == 0L) {
+          return(NA_real_)
+        }
+
+        min(local_values)
+      },
+      numeric(1)
+    ),
+    Near_optimum_Calinski_Harabasz =
+      Calinski_Harabasz >=
+      (1 - near_optimum_fraction) * max(Calinski_Harabasz),
+    Near_optimum_Silhouette =
+      Silhouette >=
+      (1 - near_optimum_fraction) * max(Silhouette),
+    Near_optimum_Davies_Bouldin =
+      Davies_Bouldin <=
+      (1 + near_optimum_fraction) * min(Davies_Bouldin),
+    Near_optimal_and_locally_stable =
+      Near_optimum_Calinski_Harabasz &
+      Near_optimum_Silhouette &
+      Near_optimum_Davies_Bouldin &
+      Minimum_local_adjacent_ARI >= adjacent_ari_threshold &
+      Median_ARI_to_reference >= adjacent_ari_threshold
+  )
+
+best_internal_candidates <- results_by_k %>%
+  dplyr::arrange(
+    Internal_rank_sum,
+    dplyr::desc(Median_ARI_to_reference),
+    dplyr::desc(Exact_reference_recovery_rate),
+    k
+  ) %>%
+  dplyr::slice_head(n = 15L)
+
+pairwise_k_ari_long <- as.data.frame(as.table(pairwise_k_ari_matrix)) %>%
+  dplyr::transmute(
+    k_1 = as.integer(as.character(Var1)),
+    k_2 = as.integer(as.character(Var2)),
+    ARI = as.numeric(Freq)
+  ) %>%
+  dplyr::filter(k_1 <= k_2) %>%
+  dplyr::arrange(k_1, k_2)
+
+# ------------------------------------------------------------
+# 12. Identify structural, high-stability and exact plateaus
+# ------------------------------------------------------------
+
+same_count_break <- c(
+  TRUE,
+  diff(results_by_k$Clusters) != 0L
+)
+
+high_stability_break <- c(
+  TRUE,
+  !adjacent_k_stability$High_adjacent_stability
+)
+
+exact_plateau_break <- c(
+  TRUE,
+  !(
+    adjacent_k_stability$Same_community_count &
+      adjacent_k_stability$Exact_partition_equivalence
+  )
+)
+
+same_count_group <- cumsum(same_count_break)
+high_stability_group <- cumsum(high_stability_break)
+exact_plateau_group <- cumsum(exact_plateau_break)
+
+summarise_plateau_groups <- function(group_vector, plateau_type) {
+  group_ids <- unique(group_vector)
+
+  dplyr::bind_rows(
+    lapply(
+      group_ids,
+      function(group_id) {
+        positions <- which(group_vector == group_id)
+        group_k <- results_by_k$k[positions]
+        group_clusters <- unique(results_by_k$Clusters[positions])
+
+        if (length(positions) > 1L) {
+          group_pairwise_ari <- pairwise_k_ari_matrix[
+            positions,
+            positions,
+            drop = FALSE
+          ][upper.tri(pairwise_k_ari_matrix[
+            positions,
+            positions,
+            drop = FALSE
+          ])]
+
+          group_adjacent_ari <- adjacent_k_stability %>%
+            dplyr::filter(
+              Previous_k >= min(group_k),
+              k <= max(group_k)
+            ) %>%
+            dplyr::pull(ARI_to_previous_k)
+        } else {
+          group_pairwise_ari <- NA_real_
+          group_adjacent_ari <- NA_real_
+        }
+
+        tibble::tibble(
+          Plateau_type = plateau_type,
+          Plateau_ID = group_id,
+          Minimum_k = min(group_k),
+          Maximum_k = max(group_k),
+          Number_of_consecutive_k_values = length(group_k),
+          Communities = if (length(group_clusters) == 1L) {
+            group_clusters
+          } else {
+            NA_integer_
+          },
+          Mean_pairwise_ARI = if (all(is.na(group_pairwise_ari))) {
+            NA_real_
+          } else {
+            mean(group_pairwise_ari, na.rm = TRUE)
+          },
+          Median_pairwise_ARI = if (all(is.na(group_pairwise_ari))) {
+            NA_real_
+          } else {
+            stats::median(group_pairwise_ari, na.rm = TRUE)
+          },
+          Minimum_pairwise_ARI = if (all(is.na(group_pairwise_ari))) {
+            NA_real_
+          } else {
+            min(group_pairwise_ari, na.rm = TRUE)
+          },
+          Mean_adjacent_ARI = if (all(is.na(group_adjacent_ari))) {
+            NA_real_
+          } else {
+            mean(group_adjacent_ari, na.rm = TRUE)
+          },
+          Minimum_adjacent_ARI = if (all(is.na(group_adjacent_ari))) {
+            NA_real_
+          } else {
+            min(group_adjacent_ari, na.rm = TRUE)
+          },
+          Median_seed_ARI = stats::median(
+            results_by_k$Median_ARI_to_reference[positions]
+          ),
+          Minimum_seed_ARI = min(
+            results_by_k$Minimum_ARI_to_reference[positions]
+          ),
+          Mean_exact_seed_recovery_rate = mean(
+            results_by_k$Exact_reference_recovery_rate[positions]
+          ),
+          Best_internal_rank_k = results_by_k$k[
+            positions[which.min(results_by_k$Internal_rank_sum[positions])]
+          ],
+          Best_internal_rank_sum = min(
+            results_by_k$Internal_rank_sum[positions]
+          ),
+          Minimum_cluster_size_across_plateau = min(
+            results_by_k$Minimum_cluster_size[positions]
+          ),
+          All_graphs_connected = all(
+            results_by_k$Connected[positions]
+          )
+        )
+      }
+    )
+  )
+}
+
+plateau_summary <- dplyr::bind_rows(
+  summarise_plateau_groups(
+    same_count_group,
+    "Consecutive k with the same community count"
+  ),
+  summarise_plateau_groups(
+    high_stability_group,
+    paste0(
+      "Same community count and adjacent ARI >= ",
+      adjacent_ari_threshold
+    )
+  ),
+  summarise_plateau_groups(
+    exact_plateau_group,
+    "Same community count and exact adjacent partition equivalence"
+  )
+) %>%
+  dplyr::arrange(
+    Plateau_type,
+    Minimum_k
+  )
+
+plateau_summary_non_singleton <- plateau_summary %>%
+  dplyr::filter(Number_of_consecutive_k_values >= 2L)
+
+# ------------------------------------------------------------
+# 13. Prepare diagnostic figures
+# ------------------------------------------------------------
+
+near_optimal_k <- results_by_k$k[
+  results_by_k$Near_optimal_and_locally_stable
+]
+
+if (length(near_optimal_k) > 0L) {
+  near_optimal_group <- cumsum(
+    c(
+      TRUE,
+      diff(near_optimal_k) != 1L
+    )
+  )
+
+  near_optimal_ranges <- dplyr::bind_rows(
+    lapply(
+      unique(near_optimal_group),
+      function(group_id) {
+        group_k <- near_optimal_k[near_optimal_group == group_id]
+
+        tibble::tibble(
+          Minimum_k = min(group_k),
+          Maximum_k = max(group_k),
+          xmin = min(group_k) - 0.5,
+          xmax = max(group_k) + 0.5
+        )
+      }
+    )
+  )
+} else {
+  near_optimal_ranges <- tibble::tibble(
+    Minimum_k = integer(0),
+    Maximum_k = integer(0),
+    xmin = numeric(0),
+    xmax = numeric(0)
+  )
+}
+
+rajput_panel_levels <- c(
+  "A  Calinski-Harabasz",
+  "B  Mean silhouette",
+  "C  Davies-Bouldin"
+)
+
+rajput_s4_data <- dplyr::bind_rows(
+  tibble::tibble(
+    k = results_by_k$k,
+    Panel = rajput_panel_levels[1],
+    Value = results_by_k$Calinski_Harabasz
+  ),
+  tibble::tibble(
+    k = results_by_k$k,
+    Panel = rajput_panel_levels[2],
+    Value = results_by_k$Silhouette
+  ),
+  tibble::tibble(
+    k = results_by_k$k,
+    Panel = rajput_panel_levels[3],
+    Value = results_by_k$Davies_Bouldin
+  )
+) %>%
+  dplyr::mutate(
+    Panel = factor(Panel, levels = rajput_panel_levels)
+  )
+
+if (nrow(near_optimal_ranges) > 0L) {
+  rajput_highlight_data <- merge(
+    near_optimal_ranges,
+    data.frame(
+      Panel = factor(
+        rajput_panel_levels,
+        levels = rajput_panel_levels
+      )
+    ),
+    by = NULL
+  )
+} else {
+  rajput_highlight_data <- data.frame(
+    Minimum_k = integer(0),
+    Maximum_k = integer(0),
+    xmin = numeric(0),
+    xmax = numeric(0),
+    Panel = factor(character(0), levels = rajput_panel_levels)
+  )
+}
+
+rajput_s4_plot <- ggplot2::ggplot(
+  rajput_s4_data,
+  ggplot2::aes(x = k, y = Value)
+) +
+  ggplot2::geom_rect(
+    data = rajput_highlight_data,
+    ggplot2::aes(
+      xmin = xmin,
+      xmax = xmax,
+      ymin = -Inf,
+      ymax = Inf
+    ),
+    inherit.aes = FALSE,
+    fill = "#D73027",
+    alpha = 0.14
+  ) +
+  ggplot2::geom_line(linewidth = 0.55, colour = "black") +
+  ggplot2::geom_point(size = 1.35, colour = "black") +
+  ggplot2::facet_wrap(~Panel, scales = "free_y", ncol = 1) +
+  ggplot2::scale_x_continuous(breaks = seq(5, 80, by = 5)) +
+  ggplot2::labs(
+    x = "Number of nearest neighbours (k)",
+    y = NULL,
+    title = "Internal validation of the kNN-Louvain solution",
+    subtitle = paste0(
+      "Red: within 5% of all three point optima and local/seed ARI >= ",
+      sprintf("%.2f", adjacent_ari_threshold)
+    )
+  ) +
+  ggplot2::theme_classic(base_size = 11) +
+  ggplot2::theme(
+    strip.background = ggplot2::element_rect(
+      fill = "white",
+      colour = "black",
+      linewidth = 0.35
+    ),
+    strip.text = ggplot2::element_text(
+      face = "bold",
+      hjust = 0
+    ),
+    panel.border = ggplot2::element_rect(
+      colour = "black",
+      fill = NA,
+      linewidth = 0.35
+    )
+  )
+
+metric_plot_data <- dplyr::bind_rows(
+  tibble::tibble(
+    k = results_by_k$k,
+    Metric = "Calinski-Harabasz (higher is better)",
+    Value = results_by_k$Calinski_Harabasz
+  ),
+  tibble::tibble(
+    k = results_by_k$k,
+    Metric = "Silhouette (higher is better)",
+    Value = results_by_k$Silhouette
+  ),
+  tibble::tibble(
+    k = results_by_k$k,
+    Metric = "Davies-Bouldin (lower is better)",
+    Value = results_by_k$Davies_Bouldin
+  ),
+  tibble::tibble(
+    k = results_by_k$k,
+    Metric = "Weighted modularity (diagnostic)",
+    Value = results_by_k$Weighted_modularity
+  ),
+  tibble::tibble(
+    k = results_by_k$k,
+    Metric = "Number of communities",
+    Value = results_by_k$Clusters
+  ),
+  tibble::tibble(
+    k = results_by_k$k,
+    Metric = "Minimum community size",
+    Value = results_by_k$Minimum_cluster_size
+  )
+)
+
+stability_plot_data <- dplyr::bind_rows(
+  tibble::tibble(
+    k = results_by_k$k,
+    Metric = "Median ARI to seed-medoid partition",
+    Value = results_by_k$Median_ARI_to_reference
+  ),
+  tibble::tibble(
+    k = results_by_k$k,
+    Metric = "Exact seed recovery rate",
+    Value = results_by_k$Exact_reference_recovery_rate
+  ),
+  tibble::tibble(
+    k = results_by_k$k,
+    Metric = "ARI to previous k",
+    Value = results_by_k$ARI_to_previous_k
+  ),
+  tibble::tibble(
+    k = results_by_k$k,
+    Metric = "Graph density",
+    Value = results_by_k$Graph_density
+  )
+)
+
+diagnostic_plot <- ggplot2::ggplot(
+  metric_plot_data,
+  ggplot2::aes(x = k, y = Value)
+) +
+  ggplot2::geom_line(linewidth = 0.45, colour = "#1F4E79") +
+  ggplot2::geom_point(size = 1.2, colour = "#1F4E79") +
+  ggplot2::facet_wrap(~Metric, scales = "free_y", ncol = 2) +
+  ggplot2::scale_x_continuous(breaks = seq(5, 80, by = 5)) +
+  ggplot2::labs(
+    x = "Number of nearest neighbours (k)",
+    y = NULL,
+    title = "Louvain k optimisation: internal and graph diagnostics"
+  ) +
+  ggplot2::theme_classic(base_size = 11) +
+  ggplot2::theme(
+    strip.background = ggplot2::element_rect(
+      fill = "grey94",
+      colour = "black",
+      linewidth = 0.35
+    ),
+    panel.border = ggplot2::element_rect(
+      colour = "black",
+      fill = NA,
+      linewidth = 0.35
+    )
+  )
+
+stability_plot <- ggplot2::ggplot(
+  stability_plot_data,
+  ggplot2::aes(x = k, y = Value)
+) +
+  ggplot2::geom_hline(
+    data = data.frame(
+      Metric = "ARI to previous k",
+      Threshold = adjacent_ari_threshold
+    ),
+    ggplot2::aes(yintercept = Threshold),
+    inherit.aes = FALSE,
+    linetype = "dashed",
+    linewidth = 0.4,
+    colour = "#B22222"
+  ) +
+  ggplot2::geom_line(linewidth = 0.45, colour = "#2E6B3A", na.rm = TRUE) +
+  ggplot2::geom_point(size = 1.2, colour = "#2E6B3A", na.rm = TRUE) +
+  ggplot2::facet_wrap(~Metric, scales = "free_y", ncol = 2) +
+  ggplot2::scale_x_continuous(breaks = seq(5, 80, by = 5)) +
+  ggplot2::labs(
+    x = "Number of nearest neighbours (k)",
+    y = NULL,
+    title = "Louvain k optimisation: seed and neighbourhood stability"
+  ) +
+  ggplot2::theme_classic(base_size = 11) +
+  ggplot2::theme(
+    strip.background = ggplot2::element_rect(
+      fill = "grey94",
+      colour = "black",
+      linewidth = 0.35
+    ),
+    panel.border = ggplot2::element_rect(
+      colour = "black",
+      fill = NA,
+      linewidth = 0.35
+    )
+  )
+
+# ------------------------------------------------------------
+# 14. Define output files
+# ------------------------------------------------------------
+
+results_csv <- file.path(
+  tables_dir,
+  "Objective1_LouvainOptimisation_by_k.csv"
+)
+
+seed_runs_csv <- file.path(
+  tables_dir,
+  "Objective1_LouvainOptimisation_seed_runs.csv"
+)
+
+point_optima_csv <- file.path(
+  tables_dir,
+  "Objective1_LouvainOptimisation_point_optima.csv"
+)
+
+adjacent_stability_csv <- file.path(
+  tables_dir,
+  "Objective1_LouvainOptimisation_adjacent_k_ARI.csv"
+)
+
+pairwise_k_ari_csv <- file.path(
+  tables_dir,
+  "Objective1_LouvainOptimisation_pairwise_k_ARI.csv"
+)
+
+plateau_summary_csv <- file.path(
+  tables_dir,
+  "Objective1_LouvainOptimisation_plateaus.csv"
+)
+
+robust_audit_csv <- file.path(
+  tables_dir,
+  "Objective1_LouvainOptimisation_robust_audit.csv"
+)
+
+diagnostic_pdf <- file.path(
+  figures_dir,
+  "FigureS_Louvain_k_Optimisation_Diagnostics.pdf"
+)
+
+diagnostic_tiff <- file.path(
+  figures_dir,
+  "FigureS_Louvain_k_Optimisation_Diagnostics.tiff"
+)
+
+stability_pdf <- file.path(
+  figures_dir,
+  "FigureS_Louvain_k_Optimisation_Stability.pdf"
+)
+
+stability_tiff <- file.path(
+  figures_dir,
+  "FigureS_Louvain_k_Optimisation_Stability.tiff"
+)
+
+rajput_s4_pdf <- file.path(
+  figures_dir,
+  "FigureS4_Louvain_k_Optimisation_RajputStyle.pdf"
+)
+
+rajput_s4_tiff <- file.path(
+  figures_dir,
+  "FigureS4_Louvain_k_Optimisation_RajputStyle.tiff"
+)
+
+results_rds <- file.path(
+  objects_dir,
+  "objective1_louvain_optimisation_results_robust.rds"
+)
+
+memberships_rds <- file.path(
+  objects_dir,
+  "objective1_louvain_optimisation_memberships_robust.rds"
+)
+
+seed_runs_rds <- file.path(
+  objects_dir,
+  "objective1_louvain_optimisation_seed_runs_robust.rds"
+)
+
+seed_memberships_rds <- file.path(
+  objects_dir,
+  "objective1_louvain_optimisation_seed_memberships_robust.rds"
+)
+
+pairwise_k_ari_rds <- file.path(
+  objects_dir,
+  "objective1_louvain_optimisation_pairwise_k_ari_robust.rds"
+)
+
+plateaus_rds <- file.path(
+  objects_dir,
+  "objective1_louvain_optimisation_plateaus_robust.rds"
+)
+
+configuration_rds <- file.path(
+  objects_dir,
+  "objective1_louvain_optimisation_configuration_robust.rds"
+)
+
+session_info_file <- file.path(
+  tables_dir,
+  "Objective1_LouvainOptimisation_sessionInfo.txt"
+)
+
+# ------------------------------------------------------------
+# 15. Export diagnostic results and reproducibility objects
+# ------------------------------------------------------------
+
+utils::write.csv(results_by_k, results_csv, row.names = FALSE)
+utils::write.csv(seed_runs, seed_runs_csv, row.names = FALSE)
+utils::write.csv(point_optima, point_optima_csv, row.names = FALSE)
+utils::write.csv(
+  adjacent_k_stability,
+  adjacent_stability_csv,
+  row.names = FALSE
+)
+utils::write.csv(pairwise_k_ari_long, pairwise_k_ari_csv, row.names = FALSE)
+utils::write.csv(plateau_summary, plateau_summary_csv, row.names = FALSE)
+utils::write.csv(robust_audit, robust_audit_csv, row.names = FALSE)
+
+ggplot2::ggsave(
+  filename = diagnostic_pdf,
+  plot = diagnostic_plot,
+  width = 9,
+  height = 10,
+  units = "in"
+)
+
+ggplot2::ggsave(
+  filename = diagnostic_tiff,
+  plot = diagnostic_plot,
+  width = 9,
+  height = 10,
+  units = "in",
+  dpi = 600,
+  compression = "lzw"
+)
+
+ggplot2::ggsave(
+  filename = stability_pdf,
+  plot = stability_plot,
+  width = 9,
+  height = 7,
+  units = "in"
+)
+
+ggplot2::ggsave(
+  filename = stability_tiff,
+  plot = stability_plot,
+  width = 9,
+  height = 7,
+  units = "in",
+  dpi = 600,
+  compression = "lzw"
+)
+
+ggplot2::ggsave(
+  filename = rajput_s4_pdf,
+  plot = rajput_s4_plot,
+  width = 7,
+  height = 9,
+  units = "in"
+)
+
+ggplot2::ggsave(
+  filename = rajput_s4_tiff,
+  plot = rajput_s4_plot,
+  width = 7,
+  height = 9,
+  units = "in",
+  dpi = 600,
+  compression = "lzw"
+)
+
+optimisation_configuration <- list(
+  Status = "Exploratory k optimisation; no final k selected automatically",
+  Input_file = robust_data_file,
+  Number_of_control_fish = nrow(X),
+  Number_of_cohorts = observed_number_of_cohorts,
+  Traceability_key = "Author + ID",
+  Robust_variables = robust_variables,
+  Normalisation = "Within Author using controls: (x - median) / (1.4826 x raw MAD)",
+  Analytical_matrix = "All 89 controls jointly after cohort-wise normalisation",
+  Clustering_space = "Original four-dimensional robust behavioural space",
+  Distance = "Euclidean",
+  Similarity = "1 / (1 + Euclidean distance)",
+  Graph = "Weighted, undirected union kNN",
+  k_values = k_values,
+  Number_of_seed_runs_per_k = number_of_seed_runs,
+  Seed_values = seed_values,
+  Representative_partition = paste0(
+    "ARI medoid across seeds; modularity and seed used only as tie-breakers"
+  ),
+  Internal_indices = c(
+    "Calinski-Harabasz",
+    "Mean silhouette",
+    "Davies-Bouldin"
+  ),
+  Modularity_role = paste0(
+    "Within-graph diagnostic only; not included in the across-k internal rank"
+  ),
+  Adjacent_ARI_threshold = adjacent_ari_threshold,
+  Near_optimum_fraction = near_optimum_fraction,
+  Near_optimal_locally_stable_ranges = near_optimal_ranges,
+  Rajput_S4_style_figure_generated_in_R = TRUE,
+  Historical_k_values_not_imposed = c(53L, 56L),
+  Historical_partition_not_imposed = "41/48",
+  Bootstrap_performed = FALSE,
+  Final_k_selected = FALSE
+)
+
+saveRDS(results_by_k, results_rds)
+saveRDS(memberships_by_k, memberships_rds)
+saveRDS(seed_runs_by_k, seed_runs_rds)
+saveRDS(seed_membership_matrices, seed_memberships_rds)
+saveRDS(pairwise_k_ari_matrix, pairwise_k_ari_rds)
+saveRDS(plateau_summary, plateaus_rds)
+saveRDS(optimisation_configuration, configuration_rds)
+
+capture.output(utils::sessionInfo(), file = session_info_file)
+
+# ------------------------------------------------------------
+# 16. Verify every expected output
+# ------------------------------------------------------------
+
+expected_output_files <- c(
+  results_csv,
+  seed_runs_csv,
+  point_optima_csv,
+  adjacent_stability_csv,
+  pairwise_k_ari_csv,
+  plateau_summary_csv,
+  robust_audit_csv,
+  diagnostic_pdf,
+  diagnostic_tiff,
+  stability_pdf,
+  stability_tiff,
+  rajput_s4_pdf,
+  rajput_s4_tiff,
+  results_rds,
+  memberships_rds,
+  seed_runs_rds,
+  seed_memberships_rds,
+  pairwise_k_ari_rds,
+  plateaus_rds,
+  configuration_rds,
+  session_info_file
+)
+
+output_file_info <- file.info(expected_output_files)
+
+if (
+  any(!file.exists(expected_output_files)) ||
+  any(is.na(output_file_info$size)) ||
+  any(output_file_info$size <= 0)
+) {
+  stop("At least one optimisation output file was not created correctly.")
+}
+
+# ------------------------------------------------------------
+# 17. Final console audit
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("SCRIPT 006.0 — kNN-LOUVAIN k RE-OPTIMISATION\n")
+cat("============================================================\n")
+
+cat("\nAnalytical status: exploratory; no final k selected.\n")
+cat("Number of control fish: ", nrow(X), "\n", sep = "")
+cat(
+  "Pooled analytical matrix after cohort normalisation: ",
+  nrow(X),
+  " rows x ",
+  ncol(X),
+  " variables\n",
+  sep = ""
+)
+cat(
+  "Traceability retained: Author + ID across ",
+  observed_number_of_cohorts,
+  " cohorts.\n",
+  sep = ""
+)
+cat(
+  "k range scanned: ",
+  min(k_values),
+  "-",
+  max(k_values),
+  " (",
+  length(k_values),
+  " values).\n",
+  sep = ""
+)
+cat(
+  "Louvain runs per k: ",
+  number_of_seed_runs,
+  " (total runs: ",
+  length(k_values) * number_of_seed_runs,
+  ").\n",
+  sep = ""
+)
+cat("Historical k = 53 and k = 56 were not imposed.\n")
+cat("No number of communities was imposed.\n")
+cat("Bootstrap was not performed in this optimisation script.\n")
+
+cat("\nControl fish by cohort:\n")
+print(as.data.frame(cohort_counts), row.names = FALSE)
+
+cat("\nRobust-normalisation audit (16 Author x variable sets):\n")
+print(as.data.frame(robust_audit), row.names = FALSE)
+
+cat("\nPoint optima and screening criteria:\n")
+print(as.data.frame(point_optima), row.names = FALSE)
+
+cat("\nTop 15 k values by the three-index internal rank sum:\n")
+print(
+  as.data.frame(
+    best_internal_candidates %>%
+      dplyr::select(
+        k,
+        Clusters,
+        Cluster_sizes,
+        Calinski_Harabasz,
+        Silhouette,
+        Davies_Bouldin,
+        Weighted_modularity,
+        Median_ARI_to_reference,
+        Exact_reference_recovery_rate,
+        ARI_to_previous_k,
+        Graph_density,
+        Internal_rank_sum
+      )
+  ),
+  row.names = FALSE
+)
+
+cat("\nNon-singleton stability plateaus:\n")
+print(as.data.frame(plateau_summary_non_singleton), row.names = FALSE)
+
+cat("\nRajput-S4-style near-optimal and locally stable ranges:\n")
+
+if (nrow(near_optimal_ranges) == 0L) {
+  cat(
+    "No k range simultaneously met all pre-specified near-optimum ",
+    "and ARI criteria. No red region was drawn.\n",
+    sep = ""
+  )
+} else {
+  print(
+    as.data.frame(
+      near_optimal_ranges %>%
+        dplyr::select(Minimum_k, Maximum_k)
+    ),
+    row.names = FALSE
+  )
+}
+
+cat(
+  "\nInterpretive warning: weighted modularity is reported as a ",
+  "within-graph diagnostic and was not used in the across-k rank, ",
+  "because graph density changes strongly with k.\n",
+  sep = ""
+)
+
+cat(
+  "No k should be transferred to 006_Figure4_Louvain.R until ",
+  "the console tables and both diagnostic figures have been audited.\n"
+)
+
+cat("\nDiagnostic figures saved as:\n")
+cat(normalizePath(diagnostic_pdf, winslash = "/", mustWork = TRUE), "\n")
+cat(normalizePath(diagnostic_tiff, winslash = "/", mustWork = TRUE), "\n")
+cat(normalizePath(stability_pdf, winslash = "/", mustWork = TRUE), "\n")
+cat(normalizePath(stability_tiff, winslash = "/", mustWork = TRUE), "\n")
+cat(normalizePath(rajput_s4_pdf, winslash = "/", mustWork = TRUE), "\n")
+cat(normalizePath(rajput_s4_tiff, winslash = "/", mustWork = TRUE), "\n")
+
+cat("\nAll integrity checks passed.\n")
+cat("============================================================\n")
