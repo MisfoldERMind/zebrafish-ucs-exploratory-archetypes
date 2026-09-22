@@ -26,14 +26,7 @@
 # 1. Project directory and packages
 # ------------------------------------------------------------
 
-base_dir <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+base_dir <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(base_dir)) {
   stop("Project directory not found:\n", base_dir)
@@ -1005,3 +998,67 @@ ggplot2::ggsave(
 
 ggplot2::ggsave(
   filename = png_output,
+  plot = main_panel,
+  device = "png",
+  width = 12.0,
+  height = 8.3,
+  units = "in",
+  dpi = 600,
+  bg = "white"
+)
+
+expected_output_files <- c(pdf_output, tiff_output, png_output)
+missing_output_files <- expected_output_files[
+  !file.exists(expected_output_files)
+]
+
+if (length(missing_output_files) > 0L) {
+  stop(
+    "The following final figure files were not created:\n",
+    paste(missing_output_files, collapse = "\n")
+  )
+}
+
+# ------------------------------------------------------------
+# 15. Final audit
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("OBJECTIVE 3 - MAIN THREE-PANEL FIGURE\n")
+cat("============================================================\n")
+cat("\nStress fish: ", expected_n, "\n", sep = "")
+cat("Final behavioural clusters: ", expected_clusters, "\n", sep = "")
+cat(
+  "Cluster sizes: ",
+  paste(sort(cluster_sizes$n), collapse = " and "),
+  "\n",
+  sep = ""
+)
+cat(
+  "Panel A: PC1 = ",
+  pc1_variance,
+  "%; PC2 = ",
+  pc2_variance,
+  "%\n",
+  sep = ""
+)
+cat("Panel B summary:\n")
+cat("  De novo Stress behavioural clusters: 45 and 44 fish\n")
+cat("  Stress cluster + Control-derived reference profile:\n")
+cat("    Resilient-like = 22\n")
+cat("    Unresolved = 23\n")
+cat("    Susceptible-like = 44\n")
+cat("Panel C summary: median and interquartile range\n")
+cat("No ellipses, no ARI, and no inferential cluster-contrast statistics displayed.\n")
+
+cat(
+  "\nFigure saved as:\n",
+  normalizePath(pdf_output, winslash = "/", mustWork = FALSE),
+  "\n",
+  normalizePath(tiff_output, winslash = "/", mustWork = FALSE),
+  "\n",
+  normalizePath(png_output, winslash = "/", mustWork = FALSE),
+  "\n",
+  sep = ""
+)
+cat("\n============================================================\n")
