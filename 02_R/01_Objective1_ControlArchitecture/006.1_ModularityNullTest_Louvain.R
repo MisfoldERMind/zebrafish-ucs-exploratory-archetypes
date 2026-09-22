@@ -26,14 +26,7 @@
 # 1. Project directory and required packages
 # ------------------------------------------------------------
 
-base_dir <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+base_dir <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(base_dir)) {
   stop("Project directory not found:\n", base_dir)
@@ -1005,3 +998,1366 @@ required_optimisation_columns <- c(
 if (
   !is.data.frame(optimisation_results) ||
   !all(required_optimisation_columns %in% names(optimisation_results)) ||
+  !identical(as.integer(optimisation_results$k), as.integer(k_values))
+) {
+  stop("The saved 006.0 optimisation-results object is incompatible.")
+}
+
+if (
+  !is.list(optimisation_memberships) ||
+  length(optimisation_memberships) != length(k_values)
+) {
+  stop("The saved 006.0 membership object is incompatible.")
+}
+
+extract_saved_membership <- function(k_value) {
+  k_position <- match(k_value, k_values)
+  membership_table <- optimisation_memberships[[k_position]]
+
+  if (
+    !is.data.frame(membership_table) ||
+    !all(c("Author", "ID", "Node_ID", "Cluster") %in%
+      names(membership_table)) ||
+    anyDuplicated(membership_table$Node_ID) > 0L ||
+    !setequal(membership_table$Node_ID, control_robust$Node_ID)
+  ) {
+    stop("Invalid saved membership at k = ", k_value, ".")
+  }
+
+  membership_table <- membership_table[
+    match(control_robust$Node_ID, membership_table$Node_ID),
+    ,
+    drop = FALSE
+  ]
+
+  as.integer(membership_table$Cluster)
+}
+
+saved_membership_45 <- extract_saved_membership(expected_selected_k)
+saved_sizes_45 <- sort(as.integer(table(saved_membership_45)))
+saved_result_45 <- optimisation_results[
+  optimisation_results$k == expected_selected_k,
+  ,
+  drop = FALSE
+]
+
+if (
+  nrow(saved_result_45) != 1L ||
+  saved_result_45$Clusters != expected_selected_communities ||
+  !identical(saved_sizes_45, expected_selected_sizes)
+) {
+  stop("The saved corrected k = 45 solution is not the expected 40/49 partition.")
+}
+
+saved_plateau_memberships <- lapply(
+  44:46,
+  extract_saved_membership
+)
+
+saved_plateau_ari <- c(
+  adjusted_rand_index(
+    saved_plateau_memberships[[1]],
+    saved_plateau_memberships[[2]]
+  ),
+  adjusted_rand_index(
+    saved_plateau_memberships[[2]],
+    saved_plateau_memberships[[3]]
+  ),
+  adjusted_rand_index(
+    saved_plateau_memberships[[1]],
+    saved_plateau_memberships[[3]]
+  )
+)
+
+if (any(saved_plateau_ari < 1 - exact_ari_tolerance)) {
+  stop("The saved k = 44-46 exact-equivalence plateau was not recovered.")
+}
+
+cat("\nAuditing the deterministic null-pipeline selection rule on observed data...\n")
+
+observed_scan <- scan_louvain_k_grid(
+  data_matrix = X,
+  scan_seed_base = data_null_seed_base - 1000000L,
+  louvain_runs_per_k = number_of_louvain_runs_per_k
+)
+
+observed_selected_k <- as.integer(observed_scan$selected$k)
+observed_selected_sizes <- sort(
+  as.integer(table(observed_scan$selected_membership))
+)
+observed_saved_ari <- adjusted_rand_index(
+  observed_scan$selected_membership,
+  saved_membership_45
+)
+
+if (
+  observed_selected_k != expected_selected_k ||
+  !identical(observed_selected_sizes, expected_selected_sizes) ||
+  observed_saved_ari < 1 - exact_ari_tolerance
+) {
+  stop(
+    "The deterministic null-pipeline rule did not reproduce the ",
+    "audited k = 45, 40/49 solution. Do not run the simulations."
+  )
+}
+
+observed_by_k <- observed_scan$by_k
+observed_selected <- observed_scan$selected
+observed_q_selected <- as.numeric(observed_selected$Weighted_modularity)
+observed_q_fixed_45 <- observed_by_k$Weighted_modularity[
+  observed_by_k$k == expected_selected_k
+]
+
+# ------------------------------------------------------------
+# 7. Fit and audit the Gaussian-copula data-space null
+# ------------------------------------------------------------
+
+make_positive_definite_correlation <- function(correlation_matrix) {
+  correlation_matrix <- (
+    correlation_matrix + t(correlation_matrix)
+  ) / 2
+  eigen_object <- eigen(correlation_matrix, symmetric = TRUE)
+  eigenvalues <- pmax(eigen_object$values, 1e-8)
+  adjusted <- eigen_object$vectors %*%
+    diag(eigenvalues, nrow = length(eigenvalues)) %*%
+    t(eigen_object$vectors)
+  scale_values <- sqrt(diag(adjusted))
+  adjusted <- adjusted / outer(scale_values, scale_values)
+  diag(adjusted) <- 1
+  adjusted
+}
+
+normal_scores <- apply(
+  X,
+  2,
+  function(values) {
+    stats::qnorm((rank(values, ties.method = "average") - 0.5) / length(values))
+  }
+)
+
+copula_correlation <- make_positive_definite_correlation(
+  stats::cor(normal_scores, method = "pearson")
+)
+copula_cholesky <- chol(copula_correlation)
+observed_sorted_marginals <- apply(X, 2, sort)
+observed_spearman <- stats::cor(X, method = "spearman")
+observed_pearson <- stats::cor(X, method = "pearson")
+
+if (
+  any(!is.finite(copula_correlation)) ||
+  max(abs(copula_correlation - t(copula_correlation))) > 1e-10 ||
+  max(abs(diag(copula_correlation) - 1)) > 1e-10
+) {
+  stop("The fitted Gaussian-copula correlation matrix failed its audit.")
+}
+
+simulate_gaussian_copula_null <- function(replicate_seed) {
+  set.seed(replicate_seed)
+  latent_independent <- matrix(
+    stats::rnorm(nrow(X) * ncol(X)),
+    nrow = nrow(X),
+    ncol = ncol(X)
+  )
+  latent_correlated <- latent_independent %*% copula_cholesky
+  null_matrix <- matrix(
+    NA_real_,
+    nrow = nrow(X),
+    ncol = ncol(X),
+    dimnames = dimnames(X)
+  )
+
+  for (variable_position in seq_len(ncol(X))) {
+    latent_rank <- rank(
+      latent_correlated[, variable_position],
+      ties.method = "first"
+    )
+    null_matrix[, variable_position] <-
+      observed_sorted_marginals[latent_rank, variable_position]
+  }
+
+  if (
+    any(!is.finite(null_matrix)) ||
+    any(vapply(
+      seq_len(ncol(X)),
+      function(variable_position) {
+        !isTRUE(all.equal(
+          unname(sort(null_matrix[, variable_position])),
+          unname(observed_sorted_marginals[, variable_position]),
+          tolerance = 0
+        ))
+      },
+      logical(1)
+    ))
+  ) {
+    stop("A Gaussian-copula null replicate failed marginal preservation.")
+  }
+
+  null_matrix
+}
+
+simulate_one_data_null <- function(replicate_id) {
+  replicate_seed <- data_null_seed_base + replicate_id * 100000L
+  null_matrix <- simulate_gaussian_copula_null(replicate_seed)
+  null_scan <- scan_louvain_k_grid(
+    data_matrix = null_matrix,
+    scan_seed_base = replicate_seed + 10000L,
+    louvain_runs_per_k = number_of_louvain_runs_per_k
+  )
+
+  null_by_k <- null_scan$by_k[, c(
+    "k",
+    "Communities",
+    "Community_sizes",
+    "Calinski_Harabasz",
+    "Silhouette",
+    "Davies_Bouldin",
+    "Weighted_modularity",
+    "Maximum_seed_modularity",
+    "Median_ARI_to_reference",
+    "Exact_recovery_rate",
+    "Unique_seed_partitions",
+    "Minimum_local_adjacent_ARI",
+    "Near_optimal_and_locally_stable",
+    "Graph_density"
+  )]
+  null_by_k$Replicate <- replicate_id
+  null_by_k <- null_by_k[, c("Replicate", setdiff(
+    names(null_by_k),
+    "Replicate"
+  ))]
+
+  null_selected <- null_scan$selected[, c(
+    "k",
+    "Communities",
+    "Community_sizes",
+    "Calinski_Harabasz",
+    "Silhouette",
+    "Davies_Bouldin",
+    "Weighted_modularity",
+    "Median_ARI_to_reference",
+    "Exact_recovery_rate",
+    "Selection_rule"
+  )]
+  null_selected$Replicate <- replicate_id
+  null_selected <- null_selected[, c(
+    "Replicate",
+    setdiff(names(null_selected), "Replicate")
+  )]
+
+  null_spearman <- stats::cor(null_matrix, method = "spearman")
+  null_pearson <- stats::cor(null_matrix, method = "pearson")
+  upper_positions <- upper.tri(observed_spearman)
+
+  correlation_audit <- data.frame(
+    Replicate = replicate_id,
+    Maximum_absolute_Spearman_difference = max(abs(
+      null_spearman[upper_positions] -
+        observed_spearman[upper_positions]
+    )),
+    RMSE_Spearman = sqrt(mean((
+      null_spearman[upper_positions] -
+        observed_spearman[upper_positions]
+    )^2)),
+    Maximum_absolute_Pearson_difference = max(abs(
+      null_pearson[upper_positions] -
+        observed_pearson[upper_positions]
+    )),
+    RMSE_Pearson = sqrt(mean((
+      null_pearson[upper_positions] -
+        observed_pearson[upper_positions]
+    )^2)),
+    stringsAsFactors = FALSE
+  )
+
+  list(
+    by_k = null_by_k,
+    selected = null_selected,
+    correlation_audit = correlation_audit
+  )
+}
+
+# ------------------------------------------------------------
+# 8. Resumable parallel execution of the data-space null
+# ------------------------------------------------------------
+
+data_null_checkpoint <- file.path(
+  objects_dir,
+  "objective1_modularity_data_null_checkpoint.rds"
+)
+
+data_null_configuration <- list(
+  Script = "006.1_ModularityNullTest_Louvain.R",
+  Method_version = "2026-08-03_v1",
+  Input_MD5 = input_md5,
+  Null_model = paste0(
+    "Gaussian copula with exact pooled empirical marginals and ",
+    "rank-dependence correlation"
+  ),
+  k_values = as.integer(k_values),
+  Replicates = number_of_data_null_replicates,
+  Louvain_runs_per_k = number_of_louvain_runs_per_k,
+  Seed_base = data_null_seed_base,
+  Adjacent_ARI_threshold = adjacent_ari_threshold,
+  Near_optimum_fraction = near_optimum_fraction
+)
+
+if (file.exists(data_null_checkpoint)) {
+  data_checkpoint_object <- readRDS(data_null_checkpoint)
+
+  if (
+    !is.list(data_checkpoint_object) ||
+    !identical(
+      data_checkpoint_object$Configuration,
+      data_null_configuration
+    )
+  ) {
+    stop(
+      "An incompatible data-null checkpoint exists. Rename it before ",
+      "running this configuration; it will not be overwritten."
+    )
+  }
+
+  data_null_results_list <- data_checkpoint_object$Results
+} else {
+  data_null_results_list <- list()
+}
+
+completed_data_replicates <- as.integer(names(data_null_results_list))
+completed_data_replicates <- completed_data_replicates[
+  is.finite(completed_data_replicates)
+]
+pending_data_replicates <- setdiff(
+  seq_len(number_of_data_null_replicates),
+  completed_data_replicates
+)
+
+worker_function_names <- c(
+  "combination_2",
+  "adjusted_rand_index",
+  "canonicalise_membership",
+  "build_union_knn_graph",
+  "calinski_harabasz_index",
+  "mean_silhouette_index",
+  "davies_bouldin_index",
+  "stable_louvain_partition",
+  "rank_with_missing_last",
+  "select_k_from_scan",
+  "scan_louvain_k_grid",
+  "simulate_gaussian_copula_null",
+  "simulate_one_data_null"
+)
+
+worker_data_names <- c(
+  "X",
+  "k_values",
+  "adjacent_ari_threshold",
+  "near_optimum_fraction",
+  "exact_ari_tolerance",
+  "number_of_louvain_runs_per_k",
+  "data_null_seed_base",
+  "copula_cholesky",
+  "observed_sorted_marginals",
+  "observed_spearman",
+  "observed_pearson"
+)
+
+data_cluster <- NULL
+
+if (length(pending_data_replicates) > 0L && number_of_workers > 1L) {
+  data_cluster <- parallel::makeCluster(number_of_workers)
+  parallel::clusterEvalQ(data_cluster, {
+    library(igraph)
+    NULL
+  })
+  parallel::clusterExport(
+    data_cluster,
+    varlist = c(worker_function_names, worker_data_names),
+    envir = environment()
+  )
+}
+
+tryCatch(
+  {
+    while (length(pending_data_replicates) > 0L) {
+      batch_ids <- head(pending_data_replicates, checkpoint_batch_size)
+
+      batch_results <- if (is.null(data_cluster)) {
+        lapply(batch_ids, simulate_one_data_null)
+      } else {
+        parallel::parLapplyLB(
+          data_cluster,
+          batch_ids,
+          simulate_one_data_null
+        )
+      }
+
+      names(batch_results) <- as.character(batch_ids)
+      data_null_results_list[names(batch_results)] <- batch_results
+      data_null_results_list <- data_null_results_list[
+        order(as.integer(names(data_null_results_list)))
+      ]
+
+      saveRDS(
+        list(
+          Configuration = data_null_configuration,
+          Results = data_null_results_list
+        ),
+        data_null_checkpoint
+      )
+
+      pending_data_replicates <- setdiff(
+        seq_len(number_of_data_null_replicates),
+        as.integer(names(data_null_results_list))
+      )
+
+      cat(
+        "Data-space null: ",
+        length(data_null_results_list),
+        "/",
+        number_of_data_null_replicates,
+        " replicates completed.\n",
+        sep = ""
+      )
+    }
+  },
+  finally = {
+    if (!is.null(data_cluster)) {
+      parallel::stopCluster(data_cluster)
+      data_cluster <- NULL
+    }
+  }
+)
+
+data_null_by_k <- do.call(
+  rbind,
+  lapply(data_null_results_list, `[[`, "by_k")
+)
+data_null_selected <- do.call(
+  rbind,
+  lapply(data_null_results_list, `[[`, "selected")
+)
+data_null_correlation_audit <- do.call(
+  rbind,
+  lapply(data_null_results_list, `[[`, "correlation_audit")
+)
+
+row.names(data_null_by_k) <- NULL
+row.names(data_null_selected) <- NULL
+row.names(data_null_correlation_audit) <- NULL
+
+if (
+  nrow(data_null_by_k) !=
+    number_of_data_null_replicates * length(k_values) ||
+  nrow(data_null_selected) != number_of_data_null_replicates ||
+  nrow(data_null_correlation_audit) != number_of_data_null_replicates ||
+  any(!is.finite(data_null_by_k$Weighted_modularity)) ||
+  any(!is.finite(data_null_selected$Weighted_modularity))
+) {
+  stop("The aggregated data-space null results failed their audit.")
+}
+
+# ------------------------------------------------------------
+# 9. Data-space null inference
+# ------------------------------------------------------------
+
+empirical_upper_p <- function(observed_value, null_values) {
+  null_values <- null_values[is.finite(null_values)]
+  (1 + sum(null_values >= observed_value)) / (length(null_values) + 1)
+}
+
+standardised_excess <- function(observed_value, null_values) {
+  null_values <- null_values[is.finite(null_values)]
+  null_sd <- stats::sd(null_values)
+  if (!is.finite(null_sd) || null_sd <= 0) {
+    return(NA_real_)
+  }
+  (observed_value - mean(null_values)) / null_sd
+}
+
+null_selected_q <- data_null_selected$Weighted_modularity
+null_fixed_45_q <- data_null_by_k$Weighted_modularity[
+  data_null_by_k$k == expected_selected_k
+]
+
+selection_adjusted_p <- empirical_upper_p(
+  observed_q_selected,
+  null_selected_q
+)
+fixed_k_p <- empirical_upper_p(
+  observed_q_fixed_45,
+  null_fixed_45_q
+)
+
+per_k_null_summary <- dplyr::bind_rows(
+  lapply(
+    k_values,
+    function(k_value) {
+      observed_row <- observed_by_k[
+        observed_by_k$k == k_value,
+        ,
+        drop = FALSE
+      ]
+      null_values <- data_null_by_k$Weighted_modularity[
+        data_null_by_k$k == k_value
+      ]
+
+      tibble::tibble(
+        k = k_value,
+        Observed_modularity = observed_row$Weighted_modularity,
+        Null_mean = mean(null_values),
+        Null_SD = stats::sd(null_values),
+        Null_percentile_2_5 = unname(stats::quantile(null_values, 0.025)),
+        Null_median = stats::median(null_values),
+        Null_percentile_97_5 = unname(stats::quantile(null_values, 0.975)),
+        Null_percentile_99 = unname(stats::quantile(null_values, 0.99)),
+        Standardised_excess = standardised_excess(
+          observed_row$Weighted_modularity,
+          null_values
+        ),
+        Empirical_p = empirical_upper_p(
+          observed_row$Weighted_modularity,
+          null_values
+        )
+      )
+    }
+  )
+) %>%
+  dplyr::mutate(
+    Empirical_p_BH = stats::p.adjust(Empirical_p, method = "BH")
+  )
+
+null_q_matrix <- matrix(
+  NA_real_,
+  nrow = number_of_data_null_replicates,
+  ncol = length(k_values),
+  dimnames = list(
+    as.character(seq_len(number_of_data_null_replicates)),
+    as.character(k_values)
+  )
+)
+
+for (k_position in seq_along(k_values)) {
+  k_value <- k_values[k_position]
+  k_rows <- data_null_by_k[data_null_by_k$k == k_value, ]
+  k_rows <- k_rows[order(k_rows$Replicate), ]
+  null_q_matrix[, k_position] <- k_rows$Weighted_modularity
+}
+
+null_mean_by_k <- colMeans(null_q_matrix)
+null_sd_by_k <- apply(null_q_matrix, 2, stats::sd)
+
+if (any(!is.finite(null_sd_by_k)) || any(null_sd_by_k <= 0)) {
+  stop("At least one k has zero or invalid null modularity variance.")
+}
+
+null_z_matrix <- sweep(
+  sweep(null_q_matrix, 2, null_mean_by_k, "-"),
+  2,
+  null_sd_by_k,
+  "/"
+)
+observed_z_by_k <- (
+  observed_by_k$Weighted_modularity - null_mean_by_k
+) / null_sd_by_k
+
+null_maximum_z <- apply(null_z_matrix, 1, max)
+observed_maximum_z <- max(observed_z_by_k)
+observed_maximum_z_k <- k_values[which.max(observed_z_by_k)]
+global_scan_p <- empirical_upper_p(
+  observed_maximum_z,
+  null_maximum_z
+)
+
+selected_k_distribution <- data_null_selected %>%
+  dplyr::count(k, Communities, name = "Replicates") %>%
+  dplyr::mutate(
+    Percentage = 100 * Replicates / number_of_data_null_replicates
+  ) %>%
+  dplyr::arrange(dplyr::desc(Replicates), k, Communities)
+
+# ------------------------------------------------------------
+# 10. Degree-preserving graph-null sensitivity analysis
+# ------------------------------------------------------------
+
+observed_distance <- as.matrix(stats::dist(X, method = "euclidean"))
+observed_graph_45 <- build_union_knn_graph(
+  X,
+  observed_distance,
+  expected_selected_k
+)
+observed_degree_sequence <- igraph::degree(observed_graph_45)
+observed_edge_weights <- igraph::E(observed_graph_45)$weight
+observed_edge_list <- igraph::as_edgelist(
+  observed_graph_45,
+  names = FALSE
+)
+observed_edge_keys <- paste(
+  pmin(observed_edge_list[, 1], observed_edge_list[, 2]),
+  pmax(observed_edge_list[, 1], observed_edge_list[, 2]),
+  sep = "::"
+)
+graph_rewire_iterations <- as.integer(
+  graph_rewire_multiplier * igraph::ecount(observed_graph_45)
+)
+
+maximum_louvain_modularity <- function(graph_object, seed_values) {
+  modularity_values <- numeric(length(seed_values))
+
+  for (seed_position in seq_along(seed_values)) {
+    set.seed(seed_values[seed_position])
+    model <- igraph::cluster_louvain(
+      graph_object,
+      weights = igraph::E(graph_object)$weight
+    )
+    modularity_values[seed_position] <- igraph::modularity(
+      graph_object,
+      igraph::membership(model),
+      weights = igraph::E(graph_object)$weight
+    )
+  }
+
+  max(modularity_values)
+}
+
+observed_graph_q_max <- maximum_louvain_modularity(
+  observed_graph_45,
+  graph_null_seed_base - 100000L +
+    seq_len(number_of_graph_louvain_runs)
+)
+
+simulate_one_graph_null <- function(replicate_id) {
+  replicate_seed <- graph_null_seed_base + replicate_id * 10000L
+  set.seed(replicate_seed)
+
+  rewired_graph <- igraph::rewire(
+    observed_graph_45,
+    with = igraph::keeping_degseq(
+      niter = graph_rewire_iterations,
+      loops = FALSE
+    )
+  )
+  igraph::E(rewired_graph)$weight <- sample(
+    observed_edge_weights,
+    length(observed_edge_weights),
+    replace = FALSE
+  )
+
+  rewired_edge_list <- igraph::as_edgelist(
+    rewired_graph,
+    names = FALSE
+  )
+  rewired_edge_keys <- paste(
+    pmin(rewired_edge_list[, 1], rewired_edge_list[, 2]),
+    pmax(rewired_edge_list[, 1], rewired_edge_list[, 2]),
+    sep = "::"
+  )
+
+  if (
+    !igraph::is_simple(rewired_graph) ||
+    any(igraph::which_loop(rewired_graph)) ||
+    !identical(
+      as.integer(igraph::degree(rewired_graph)),
+      as.integer(observed_degree_sequence)
+    ) ||
+    !isTRUE(all.equal(
+      sort(igraph::E(rewired_graph)$weight),
+      sort(observed_edge_weights),
+      tolerance = 0
+    ))
+  ) {
+    stop("A degree-preserving graph-null replicate failed its audit.")
+  }
+
+  q_max <- maximum_louvain_modularity(
+    rewired_graph,
+    replicate_seed + seq_len(number_of_graph_louvain_runs)
+  )
+
+  data.frame(
+    Replicate = replicate_id,
+    Maximum_weighted_modularity = q_max,
+    Connected = igraph::is_connected(rewired_graph),
+    Edge_overlap_proportion = mean(
+      rewired_edge_keys %in% observed_edge_keys
+    ),
+    Strength_correlation_with_observed = suppressWarnings(stats::cor(
+      igraph::strength(rewired_graph, weights = igraph::E(rewired_graph)$weight),
+      igraph::strength(
+        observed_graph_45,
+        weights = observed_edge_weights
+      )
+    )),
+    stringsAsFactors = FALSE
+  )
+}
+
+graph_null_checkpoint <- file.path(
+  objects_dir,
+  "objective1_modularity_graph_null_checkpoint.rds"
+)
+
+graph_null_configuration <- list(
+  Script = "006.1_ModularityNullTest_Louvain.R",
+  Method_version = "2026-08-03_v1",
+  Input_MD5 = input_md5,
+  k = expected_selected_k,
+  Null_model = paste0(
+    "Degree-preserving simple-graph rewiring with global edge-weight permutation"
+  ),
+  Replicates = number_of_graph_null_replicates,
+  Louvain_runs_per_graph = number_of_graph_louvain_runs,
+  Rewire_iterations = graph_rewire_iterations,
+  Seed_base = graph_null_seed_base
+)
+
+if (file.exists(graph_null_checkpoint)) {
+  graph_checkpoint_object <- readRDS(graph_null_checkpoint)
+
+  if (
+    !is.list(graph_checkpoint_object) ||
+    !identical(
+      graph_checkpoint_object$Configuration,
+      graph_null_configuration
+    )
+  ) {
+    stop(
+      "An incompatible graph-null checkpoint exists. Rename it before ",
+      "running this configuration; it will not be overwritten."
+    )
+  }
+
+  graph_null_results_list <- graph_checkpoint_object$Results
+} else {
+  graph_null_results_list <- list()
+}
+
+completed_graph_replicates <- as.integer(names(graph_null_results_list))
+completed_graph_replicates <- completed_graph_replicates[
+  is.finite(completed_graph_replicates)
+]
+pending_graph_replicates <- setdiff(
+  seq_len(number_of_graph_null_replicates),
+  completed_graph_replicates
+)
+
+graph_worker_names <- c(
+  "maximum_louvain_modularity",
+  "simulate_one_graph_null"
+)
+
+graph_worker_data_names <- c(
+  "observed_graph_45",
+  "observed_degree_sequence",
+  "observed_edge_weights",
+  "observed_edge_keys",
+  "graph_rewire_iterations",
+  "graph_null_seed_base",
+  "number_of_graph_louvain_runs"
+)
+
+graph_cluster <- NULL
+
+if (length(pending_graph_replicates) > 0L && number_of_workers > 1L) {
+  graph_cluster <- parallel::makeCluster(number_of_workers)
+  parallel::clusterEvalQ(graph_cluster, {
+    library(igraph)
+    NULL
+  })
+  parallel::clusterExport(
+    graph_cluster,
+    varlist = c(graph_worker_names, graph_worker_data_names),
+    envir = environment()
+  )
+}
+
+tryCatch(
+  {
+    while (length(pending_graph_replicates) > 0L) {
+      batch_ids <- head(pending_graph_replicates, checkpoint_batch_size)
+
+      batch_results <- if (is.null(graph_cluster)) {
+        lapply(batch_ids, simulate_one_graph_null)
+      } else {
+        parallel::parLapplyLB(
+          graph_cluster,
+          batch_ids,
+          simulate_one_graph_null
+        )
+      }
+
+      names(batch_results) <- as.character(batch_ids)
+      graph_null_results_list[names(batch_results)] <- batch_results
+      graph_null_results_list <- graph_null_results_list[
+        order(as.integer(names(graph_null_results_list)))
+      ]
+
+      saveRDS(
+        list(
+          Configuration = graph_null_configuration,
+          Results = graph_null_results_list
+        ),
+        graph_null_checkpoint
+      )
+
+      pending_graph_replicates <- setdiff(
+        seq_len(number_of_graph_null_replicates),
+        as.integer(names(graph_null_results_list))
+      )
+
+      cat(
+        "Graph null: ",
+        length(graph_null_results_list),
+        "/",
+        number_of_graph_null_replicates,
+        " replicates completed.\n",
+        sep = ""
+      )
+    }
+  },
+  finally = {
+    if (!is.null(graph_cluster)) {
+      parallel::stopCluster(graph_cluster)
+      graph_cluster <- NULL
+    }
+  }
+)
+
+graph_null_results <- do.call(rbind, graph_null_results_list)
+row.names(graph_null_results) <- NULL
+
+if (
+  nrow(graph_null_results) != number_of_graph_null_replicates ||
+  any(!is.finite(graph_null_results$Maximum_weighted_modularity))
+) {
+  stop("The aggregated degree-preserving graph-null results failed.")
+}
+
+graph_null_p <- empirical_upper_p(
+  observed_graph_q_max,
+  graph_null_results$Maximum_weighted_modularity
+)
+
+# ------------------------------------------------------------
+# 11. Assemble inferential summary
+# ------------------------------------------------------------
+
+summarise_test <- function(
+  test_name,
+  status,
+  observed_value,
+  null_values,
+  empirical_p,
+  notes
+) {
+  null_values <- null_values[is.finite(null_values)]
+  exceedances <- sum(null_values >= observed_value)
+  binomial_interval <- stats::binom.test(
+    exceedances,
+    length(null_values),
+    conf.level = 0.95
+  )$conf.int
+
+  tibble::tibble(
+    Test = test_name,
+    Status = status,
+    Observed_statistic = observed_value,
+    Null_mean = mean(null_values),
+    Null_SD = stats::sd(null_values),
+    Null_percentile_2_5 = unname(stats::quantile(null_values, 0.025)),
+    Null_median = stats::median(null_values),
+    Null_percentile_97_5 = unname(stats::quantile(null_values, 0.975)),
+    Observed_minus_null_mean = observed_value - mean(null_values),
+    Standardised_excess = standardised_excess(
+      observed_value,
+      null_values
+    ),
+    Null_exceedances = exceedances,
+    Empirical_p = empirical_p,
+    Monte_Carlo_p_CI_low = unname(binomial_interval[1]),
+    Monte_Carlo_p_CI_high = unname(binomial_interval[2]),
+    Null_replicates = length(null_values),
+    Notes = notes
+  )
+}
+
+modularity_tests <- dplyr::bind_rows(
+  summarise_test(
+    test_name = paste0(
+      "Primary: Gaussian-copula null with full k-selection pipeline"
+    ),
+    status = "Primary inference",
+    observed_value = observed_q_selected,
+    null_values = null_selected_q,
+    empirical_p = selection_adjusted_p,
+    notes = paste0(
+      "Each null replicate scans k = 5:80 and selects k using CH, ",
+      "silhouette, Davies-Bouldin and ARI criteria"
+    )
+  ),
+  summarise_test(
+    test_name = "Gaussian-copula null at fixed k = 45",
+    status = "Complementary fixed-k test",
+    observed_value = observed_q_fixed_45,
+    null_values = null_fixed_45_q,
+    empirical_p = fixed_k_p,
+    notes = "Does not by itself adjust for the prior k search"
+  ),
+  summarise_test(
+    test_name = paste0(
+      "Family-wise maximum standardised modularity across k = 5:80"
+    ),
+    status = "Complementary scan-wide test",
+    observed_value = observed_maximum_z,
+    null_values = null_maximum_z,
+    empirical_p = global_scan_p,
+    notes = paste0(
+      "Standardises modularity separately at each graph density before ",
+      "taking the maximum"
+    )
+  ),
+  summarise_test(
+    test_name = "Degree-preserving graph rewiring at k = 45",
+    status = "Topological sensitivity analysis",
+    observed_value = observed_graph_q_max,
+    null_values = graph_null_results$Maximum_weighted_modularity,
+    empirical_p = graph_null_p,
+    notes = paste0(
+      "Preserves degree sequence and global weight distribution, but not ",
+      "node strengths or the original data geometry"
+    )
+  )
+)
+
+# ------------------------------------------------------------
+# 12. Diagnostic figures
+# ------------------------------------------------------------
+
+data_null_distribution_plot_data <- dplyr::bind_rows(
+  tibble::tibble(
+    Test = "A  Selection-adjusted data null",
+    Null_modularity = null_selected_q
+  ),
+  tibble::tibble(
+    Test = "B  Fixed k = 45 data null",
+    Null_modularity = null_fixed_45_q
+  )
+)
+
+data_null_observed_lines <- tibble::tibble(
+  Test = c(
+    "A  Selection-adjusted data null",
+    "B  Fixed k = 45 data null"
+  ),
+  Observed_modularity = c(
+    observed_q_selected,
+    observed_q_fixed_45
+  )
+)
+
+data_null_distribution_plot <- ggplot2::ggplot(
+  data_null_distribution_plot_data,
+  ggplot2::aes(x = Null_modularity)
+) +
+  ggplot2::geom_histogram(
+    bins = 35,
+    fill = "grey78",
+    colour = "white",
+    linewidth = 0.25
+  ) +
+  ggplot2::geom_vline(
+    data = data_null_observed_lines,
+    ggplot2::aes(xintercept = Observed_modularity),
+    inherit.aes = FALSE,
+    colour = "#B22222",
+    linewidth = 0.8
+  ) +
+  ggplot2::facet_wrap(~Test, ncol = 1, scales = "free_y") +
+  ggplot2::labs(
+    x = "Weighted modularity under the Gaussian-copula null",
+    y = "Null replicates",
+    title = "Data-space null distributions",
+    subtitle = "Red line: observed modularity"
+  ) +
+  ggplot2::theme_classic(base_size = 11) +
+  ggplot2::theme(
+    strip.background = ggplot2::element_blank(),
+    strip.text = ggplot2::element_text(face = "bold", hjust = 0)
+  )
+
+modularity_envelope_plot <- ggplot2::ggplot(
+  per_k_null_summary,
+  ggplot2::aes(x = k)
+) +
+  ggplot2::geom_ribbon(
+    ggplot2::aes(
+      ymin = Null_percentile_2_5,
+      ymax = Null_percentile_97_5
+    ),
+    fill = "grey80"
+  ) +
+  ggplot2::geom_line(
+    ggplot2::aes(y = Null_mean),
+    colour = "grey35",
+    linewidth = 0.55
+  ) +
+  ggplot2::geom_line(
+    ggplot2::aes(y = Observed_modularity),
+    colour = "#1F4E79",
+    linewidth = 0.7
+  ) +
+  ggplot2::geom_vline(
+    xintercept = expected_selected_k,
+    colour = "#B22222",
+    linetype = "dashed",
+    linewidth = 0.5
+  ) +
+  ggplot2::scale_x_continuous(breaks = seq(5, 80, by = 5)) +
+  ggplot2::labs(
+    x = "Number of nearest neighbours (k)",
+    y = "Weighted modularity",
+    title = "Observed modularity against the data-space null envelope",
+    subtitle = paste0(
+      "Blue: observed; grey: null mean and 95% interval; red: k = 45"
+    )
+  ) +
+  ggplot2::theme_classic(base_size = 11)
+
+graph_null_distribution_plot <- ggplot2::ggplot(
+  graph_null_results,
+  ggplot2::aes(x = Maximum_weighted_modularity)
+) +
+  ggplot2::geom_histogram(
+    bins = 35,
+    fill = "grey78",
+    colour = "white",
+    linewidth = 0.25
+  ) +
+  ggplot2::geom_vline(
+    xintercept = observed_graph_q_max,
+    colour = "#B22222",
+    linewidth = 0.8
+  ) +
+  ggplot2::labs(
+    x = "Maximum weighted modularity",
+    y = "Degree-preserving null graphs",
+    title = "Topology-based null distribution at k = 45",
+    subtitle = "Red line: observed graph"
+  ) +
+  ggplot2::theme_classic(base_size = 11)
+
+# ------------------------------------------------------------
+# 13. Export tables, figures and complete reproducibility object
+# ------------------------------------------------------------
+
+tests_csv <- file.path(
+  tables_dir,
+  "Objective1_ModularityNullTests.csv"
+)
+
+per_k_csv <- file.path(
+  tables_dir,
+  "Objective1_ModularityDataNull_by_k.csv"
+)
+
+selected_null_csv <- file.path(
+  tables_dir,
+  "Objective1_ModularityDataNull_selected_replicates.csv"
+)
+
+selected_k_distribution_csv <- file.path(
+  tables_dir,
+  "Objective1_ModularityDataNull_selected_k_distribution.csv"
+)
+
+correlation_audit_csv <- file.path(
+  tables_dir,
+  "Objective1_ModularityDataNull_correlation_audit.csv"
+)
+
+graph_null_csv <- file.path(
+  tables_dir,
+  "Objective1_ModularityGraphNull_replicates.csv"
+)
+
+data_null_pdf <- file.path(
+  figures_dir,
+  "FigureS_Modularity_DataNull_Distributions.pdf"
+)
+
+data_null_tiff <- file.path(
+  figures_dir,
+  "FigureS_Modularity_DataNull_Distributions.tiff"
+)
+
+envelope_pdf <- file.path(
+  figures_dir,
+  "FigureS_Modularity_DataNull_Envelope_by_k.pdf"
+)
+
+envelope_tiff <- file.path(
+  figures_dir,
+  "FigureS_Modularity_DataNull_Envelope_by_k.tiff"
+)
+
+graph_null_pdf <- file.path(
+  figures_dir,
+  "FigureS_Modularity_GraphNull_Distribution.pdf"
+)
+
+graph_null_tiff <- file.path(
+  figures_dir,
+  "FigureS_Modularity_GraphNull_Distribution.tiff"
+)
+
+complete_results_rds <- file.path(
+  objects_dir,
+  "objective1_modularity_null_test_results.rds"
+)
+
+session_info_file <- file.path(
+  tables_dir,
+  "Objective1_ModularityNullTest_sessionInfo.txt"
+)
+
+utils::write.csv(modularity_tests, tests_csv, row.names = FALSE)
+utils::write.csv(per_k_null_summary, per_k_csv, row.names = FALSE)
+utils::write.csv(data_null_selected, selected_null_csv, row.names = FALSE)
+utils::write.csv(
+  selected_k_distribution,
+  selected_k_distribution_csv,
+  row.names = FALSE
+)
+utils::write.csv(
+  data_null_correlation_audit,
+  correlation_audit_csv,
+  row.names = FALSE
+)
+utils::write.csv(graph_null_results, graph_null_csv, row.names = FALSE)
+
+ggplot2::ggsave(
+  filename = data_null_pdf,
+  plot = data_null_distribution_plot,
+  width = 7,
+  height = 7,
+  units = "in"
+)
+
+ggplot2::ggsave(
+  filename = data_null_tiff,
+  plot = data_null_distribution_plot,
+  width = 7,
+  height = 7,
+  units = "in",
+  dpi = 600,
+  compression = "lzw"
+)
+
+ggplot2::ggsave(
+  filename = envelope_pdf,
+  plot = modularity_envelope_plot,
+  width = 8,
+  height = 5.5,
+  units = "in"
+)
+
+ggplot2::ggsave(
+  filename = envelope_tiff,
+  plot = modularity_envelope_plot,
+  width = 8,
+  height = 5.5,
+  units = "in",
+  dpi = 600,
+  compression = "lzw"
+)
+
+ggplot2::ggsave(
+  filename = graph_null_pdf,
+  plot = graph_null_distribution_plot,
+  width = 7,
+  height = 5.5,
+  units = "in"
+)
+
+ggplot2::ggsave(
+  filename = graph_null_tiff,
+  plot = graph_null_distribution_plot,
+  width = 7,
+  height = 5.5,
+  units = "in",
+  dpi = 600,
+  compression = "lzw"
+)
+
+complete_results <- list(
+  Status = "Formal modularity null-model validation",
+  Input_MD5 = input_md5,
+  Traceability_key = "Author + ID",
+  Robust_normalisation = paste0(
+    "Within Author using controls: (x - median) / (1.4826 x raw MAD)"
+  ),
+  Analytical_matrix = "All 89 controls jointly after cohort-wise normalisation",
+  Data_null_configuration = data_null_configuration,
+  Graph_null_configuration = graph_null_configuration,
+  Copula_correlation = copula_correlation,
+  Observed_scan = observed_by_k,
+  Observed_selected = observed_selected,
+  Saved_006_0_k45 = saved_result_45,
+  Modularity_tests = modularity_tests,
+  Per_k_null_summary = per_k_null_summary,
+  Data_null_selected_replicates = data_null_selected,
+  Data_null_selected_k_distribution = selected_k_distribution,
+  Data_null_correlation_audit = data_null_correlation_audit,
+  Null_maximum_standardised_modularity = null_maximum_z,
+  Observed_maximum_standardised_modularity = observed_maximum_z,
+  Observed_maximum_standardised_modularity_k = observed_maximum_z_k,
+  Graph_null_replicates = graph_null_results
+)
+
+saveRDS(complete_results, complete_results_rds)
+capture.output(utils::sessionInfo(), file = session_info_file)
+
+# ------------------------------------------------------------
+# 14. Verify outputs and print the final audit
+# ------------------------------------------------------------
+
+expected_output_files <- c(
+  tests_csv,
+  per_k_csv,
+  selected_null_csv,
+  selected_k_distribution_csv,
+  correlation_audit_csv,
+  graph_null_csv,
+  data_null_pdf,
+  data_null_tiff,
+  envelope_pdf,
+  envelope_tiff,
+  graph_null_pdf,
+  graph_null_tiff,
+  complete_results_rds,
+  session_info_file,
+  data_null_checkpoint,
+  graph_null_checkpoint
+)
+
+output_info <- file.info(expected_output_files)
+
+if (
+  any(!file.exists(expected_output_files)) ||
+  any(is.na(output_info$size)) ||
+  any(output_info$size <= 0)
+) {
+  stop("At least one expected modularity-test output is absent or empty.")
+}
+
+cat("\n============================================================\n")
+cat("SCRIPT 006.1 — FORMAL MODULARITY NULL-MODEL TEST\n")
+cat("============================================================\n")
+cat("\nObserved data: 89 control fish x 4 robust variables.\n")
+cat("Traceability: Author + ID; Author not used as a clustering variable.\n")
+cat("Observed selected k: ", observed_selected_k, "\n", sep = "")
+cat(
+  "Observed communities: ",
+  expected_selected_communities,
+  " (",
+  paste(expected_selected_sizes, collapse = "/"),
+  ").\n",
+  sep = ""
+)
+cat(
+  "Observed weighted modularity at selected k: ",
+  sprintf("%.6f", observed_q_selected),
+  "\n",
+  sep = ""
+)
+cat(
+  "Encoded selection rule reproduced the saved k = 45 partition: ARI = ",
+  sprintf("%.6f", observed_saved_ari),
+  "\n",
+  sep = ""
+)
+
+cat("\nNull-model tests:\n")
+print(as.data.frame(modularity_tests), row.names = FALSE)
+
+cat("\nMost frequent k/community outcomes under the data-space null:\n")
+print(
+  as.data.frame(utils::head(selected_k_distribution, 15L)),
+  row.names = FALSE
+)
+
+cat("\nGaussian-copula dependence audit:\n")
+print(
+  data.frame(
+    Metric = c(
+      "Median maximum absolute Spearman difference",
+      "95th percentile maximum absolute Spearman difference",
+      "Median Spearman RMSE",
+      "Median Pearson RMSE"
+    ),
+    Value = c(
+      stats::median(
+        data_null_correlation_audit$Maximum_absolute_Spearman_difference
+      ),
+      unname(stats::quantile(
+        data_null_correlation_audit$Maximum_absolute_Spearman_difference,
+        0.95
+      )),
+      stats::median(data_null_correlation_audit$RMSE_Spearman),
+      stats::median(data_null_correlation_audit$RMSE_Pearson)
+    )
+  ),
+  row.names = FALSE
+)
+
+cat(
+  "\nMaximum observed standardised modularity occurred at k = ",
+  observed_maximum_z_k,
+  ".\n",
+  sep = ""
+)
+cat(
+  "Data-null replicates: ",
+  number_of_data_null_replicates,
+  "; graph-null replicates: ",
+  number_of_graph_null_replicates,
+  ".\n",
+  sep = ""
+)
+cat(
+  "Minimum attainable empirical p: ",
+  sprintf("%.6f", 1 / (number_of_data_null_replicates + 1)),
+  ".\n",
+  sep = ""
+)
+cat(
+  "Median graph-null edge overlap with the observed graph: ",
+  sprintf(
+    "%.4f",
+    stats::median(graph_null_results$Edge_overlap_proportion)
+  ),
+  ".\n",
+  sep = ""
+)
+cat(
+  "Median graph-null strength correlation with the observed graph: ",
+  sprintf(
+    "%.4f",
+    stats::median(
+      graph_null_results$Strength_correlation_with_observed,
+      na.rm = TRUE
+    )
+  ),
+  ".\n",
+  sep = ""
+)
+cat(
+  "Workers used: ",
+  number_of_workers,
+  ". Checkpoints permit exact resumption after interruption.\n",
+  sep = ""
+)
+
+cat("\nMain result table:\n")
+cat(normalizePath(tests_csv, winslash = "/", mustWork = TRUE), "\n")
+cat("\nAll integrity checks passed.\n")
+cat("============================================================\n")
