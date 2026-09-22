@@ -1,7 +1,7 @@
 # ============================================================
-# 028_SupplementaryFigureS2_Objective3_v6.R
+# 028_SupplementaryFigureS3_Objective3_v6.R
 #
-# Objective 3 - Supplementary Figure S2
+# Objective 3 - Supplementary Figure S3
 #
 # Panel A: kernel-density distributions of the four definitive
 #          Control-referenced robust behavioural variables in the
@@ -47,14 +47,7 @@
 # 1. Project directory
 # ------------------------------------------------------------
 
-base_dir <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+base_dir <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(base_dir)) {
   stop("Project directory not found:\n", base_dir)
@@ -1491,17 +1484,17 @@ print(
 
 pdf_output <- file.path(
   figures_dir,
-  "Supplementary_Figure_S2_Objective3.pdf"
+  "Supplementary_Figure_S3_Objective3.pdf"
 )
 
 tiff_output <- file.path(
   figures_dir,
-  "Supplementary_Figure_S2_Objective3.tiff"
+  "Supplementary_Figure_S3_Objective3.tiff"
 )
 
 png_output <- file.path(
   figures_dir,
-  "Supplementary_Figure_S2_Objective3.png"
+  "Supplementary_Figure_S3_Objective3.png"
 )
 
 ggplot2::ggsave(
@@ -1587,7 +1580,7 @@ if (
 # ------------------------------------------------------------
 
 cat("\n============================================================\n")
-cat("OBJECTIVE 3 - SUPPLEMENTARY FIGURE S2\n")
+cat("OBJECTIVE 3 - SUPPLEMENTARY FIGURE S3\n")
 cat("============================================================\n")
 
 cat(
