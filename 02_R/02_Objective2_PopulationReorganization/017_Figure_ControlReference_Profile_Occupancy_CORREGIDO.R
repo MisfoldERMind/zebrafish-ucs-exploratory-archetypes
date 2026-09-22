@@ -25,14 +25,7 @@
 # 1. Project directory
 # ------------------------------------------------------------
 
-project_root <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+project_root <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(project_root)) {
   stop(
@@ -1005,3 +998,248 @@ occupancy_plot <- ggplot2::ggplot(
       size = 11.5
     ),
     axis.title.y = ggplot2::element_text(
+      margin = ggplot2::margin(
+        r = 8
+      )
+    ),
+    legend.position = "right",
+    legend.title = ggplot2::element_text(
+      size = 11
+    ),
+    legend.text = ggplot2::element_text(
+      size = 10.5
+    ),
+    plot.margin = ggplot2::margin(
+      t = 8,
+      r = 10,
+      b = 8,
+      l = 8
+    )
+  )
+
+print(
+  occupancy_plot
+)
+
+# ------------------------------------------------------------
+# 11. Save the single definitive bar chart
+# ------------------------------------------------------------
+
+pdf_device <- if (
+  isTRUE(
+    base::capabilities()[["cairo"]]
+  )
+) {
+  grDevices::cairo_pdf
+} else {
+  grDevices::pdf
+}
+
+ggplot2::ggsave(
+  filename = figure_pdf_output,
+  plot = occupancy_plot,
+  width = 5.6,
+  height = 5.8,
+  units = "in",
+  device = pdf_device,
+  bg = "white"
+)
+
+ggplot2::ggsave(
+  filename = figure_tiff_output,
+  plot = occupancy_plot,
+  width = 5.6,
+  height = 5.8,
+  units = "in",
+  dpi = 600,
+  compression = "lzw",
+  bg = "white"
+)
+
+ggplot2::ggsave(
+  filename = figure_png_output,
+  plot = occupancy_plot,
+  width = 5.6,
+  height = 5.8,
+  units = "in",
+  dpi = 300,
+  bg = "white"
+)
+
+saveRDS(
+  list(
+    Plot = occupancy_plot,
+    Figure_data = figure_data,
+    Fisher_Two_sided_p = fisher_p,
+    Cramers_V = cramers_v,
+    Upstream_projection_file = projection_file,
+    Upstream_results_file = results_file,
+    Traceability = expected_traceability,
+    Normalisation = expected_normalisation,
+    k = expected_k,
+    Number_of_profiles = expected_number_of_profiles,
+    Control_profile_counts =
+      expected_control_profile_count_vector
+  ),
+  plot_object_output
+)
+
+capture.output(
+  utils::sessionInfo(),
+  file = session_info_output
+)
+
+# ------------------------------------------------------------
+# 12. Confirm output creation
+# ------------------------------------------------------------
+
+expected_output_files <- c(
+  plot_object_output,
+  figure_pdf_output,
+  figure_tiff_output,
+  figure_png_output,
+  session_info_output
+)
+
+missing_output_files <- expected_output_files[
+  !file.exists(expected_output_files)
+]
+
+if (length(missing_output_files) > 0L) {
+  stop(
+    "The following expected output files were not created:\n",
+    paste(missing_output_files, collapse = "\n")
+  )
+}
+
+# ------------------------------------------------------------
+# 13. Identify obsolete alluvial outputs
+# ------------------------------------------------------------
+
+legacy_alluvial_files <- c(
+  file.path(
+    figures_dir,
+    "Figure12_Alluvial_ArchetypeOccupancy.pdf"
+  ),
+  file.path(
+    figures_dir,
+    "Figure12_Alluvial_ArchetypeOccupancy.tiff"
+  )
+)
+
+existing_legacy_alluvial_files <- legacy_alluvial_files[
+  file.exists(legacy_alluvial_files)
+]
+
+if (length(existing_legacy_alluvial_files) > 0L) {
+  warning(
+    "Obsolete alluvial figures were detected. They were not used or ",
+    "overwritten because the Control and Stress groups are independent:\n",
+    paste(existing_legacy_alluvial_files, collapse = "\n")
+  )
+}
+
+# ------------------------------------------------------------
+# 14. Final console audit
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("OBJECTIVE 2 - NORMATIVE-PROFILE OCCUPANCY BAR CHART\n")
+cat("============================================================\n")
+
+cat(
+  "\nDesign: two independent populations; no alluvial or longitudinal ",
+  "representation was used.\n",
+  sep = ""
+)
+
+cat(
+  "\nDefinitive upstream architecture:\n",
+  "Traceability = ",
+  expected_traceability,
+  "\nNormalisation = ",
+  expected_normalisation,
+  "\nk = ",
+  expected_k,
+  "\nNormative profiles = ",
+  expected_number_of_profiles,
+  "\nControl profile sizes: Higher-exploration = ",
+  expected_control_profile_count_vector[
+    "Higher-exploration"
+  ],
+  "; Lower-exploration = ",
+  expected_control_profile_count_vector[
+    "Lower-exploration"
+  ],
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nFigure data:\n"
+)
+
+print(
+  figure_data %>%
+    dplyr::select(
+      Treatment,
+      Normative_Profile,
+      Count,
+      Percentage
+    ),
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nOccupancy inference inherited from Script 016:\n",
+  "Fisher's exact p = ",
+  format(
+    fisher_p,
+    digits = 6
+  ),
+  "\nCramer's V = ",
+  format(
+    cramers_v,
+    digits = 4
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nSingle bar-chart outputs saved as:\n",
+  normalizePath(
+    figure_pdf_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    figure_tiff_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    figure_png_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    plot_object_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    session_info_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  sep = ""
+)
+
+cat("\n============================================================\n")
