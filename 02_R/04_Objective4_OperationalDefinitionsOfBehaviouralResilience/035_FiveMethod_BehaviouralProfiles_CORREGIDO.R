@@ -44,14 +44,7 @@ cat("\nRunning: ", script_version, "\n", sep = "")
 # 0. Project root, packages, and output directories
 # ------------------------------------------------------------
 
-project_root <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+project_root <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(project_root)) {
   stop(
@@ -1005,3 +998,734 @@ p_method_profiles <- ggplot2::ggplot(
     x = Classification,
     y = Value,
     fill = Classification
+  )
+) +
+  ggplot2::geom_boxplot(
+    outlier.shape = NA,
+    width = 0.65
+  ) +
+  ggplot2::geom_jitter(
+    width = 0.12,
+    alpha = 0.45,
+    size = 1.4
+  ) +
+  ggplot2::facet_grid(
+    Variable ~ Method,
+    scales = "free_y"
+  ) +
+  ggplot2::labs(
+    x = NULL,
+    y = "Control-referenced robust behavioural value",
+    fill = NULL
+  ) +
+  ggplot2::theme_classic(
+    base_size = 11,
+    base_family = "Arial"
+  ) +
+  ggplot2::theme(
+    legend.position = "top",
+
+    axis.text.x =
+      ggplot2::element_text(
+        angle = 45,
+        hjust = 1
+      ),
+
+    strip.background =
+      ggplot2::element_blank(),
+
+    strip.text =
+      ggplot2::element_text(
+        face = "bold"
+      )
+  )
+
+print(
+  p_method_profiles
+)
+
+method_profiles_pdf <- file.path(
+  figures_dir,
+  "Objective4_FiveMethod_BehaviouralProfiles.pdf"
+)
+
+method_profiles_tiff <- file.path(
+  figures_dir,
+  "Objective4_FiveMethod_BehaviouralProfiles.tiff"
+)
+
+ggplot2::ggsave(
+  filename = method_profiles_pdf,
+  plot = p_method_profiles,
+  device = grDevices::cairo_pdf,
+  width = 15,
+  height = 10,
+  units = "in",
+  bg = "white"
+)
+
+ggplot2::ggsave(
+  filename = method_profiles_tiff,
+  plot = p_method_profiles,
+  width = 15,
+  height = 10,
+  units = "in",
+  dpi = 600,
+  compression = "lzw",
+  bg = "white"
+)
+
+# ------------------------------------------------------------
+# 17. Behavioural-centroid figure
+# ------------------------------------------------------------
+
+centroid_long <- method_centroids %>%
+  tidyr::pivot_longer(
+    cols =
+      dplyr::all_of(
+        behaviour_variables
+      ),
+
+    names_to =
+      "Variable",
+
+    values_to =
+      "Centroid"
+  ) %>%
+  dplyr::mutate(
+    Variable = factor(
+      Variable,
+      levels = behaviour_variables,
+      labels = c(
+        "Distance",
+        "Line crossings",
+        "Upper-zone entries",
+        "Upper-zone time"
+      )
+    )
+  )
+
+p_centroids <- ggplot2::ggplot(
+  centroid_long,
+  ggplot2::aes(
+    x = Variable,
+    y = Centroid,
+    group = Classification,
+    linetype = Classification,
+    shape = Classification
+  )
+) +
+  ggplot2::geom_hline(
+    yintercept = 0,
+    linetype = "dotted"
+  ) +
+  ggplot2::geom_line(
+    linewidth = 0.8
+  ) +
+  ggplot2::geom_point(
+    size = 2.7
+  ) +
+  ggplot2::facet_wrap(
+    ~ Method,
+    ncol = 3
+  ) +
+  ggplot2::labs(
+    x = NULL,
+    y = "Behavioural centroid (Control-referenced robust units)",
+    linetype = NULL,
+    shape = NULL
+  ) +
+  ggplot2::theme_classic(
+    base_size = 12,
+    base_family = "Arial"
+  ) +
+  ggplot2::theme(
+    legend.position = "top",
+
+    axis.text.x =
+      ggplot2::element_text(
+        angle = 35,
+        hjust = 1
+      )
+  )
+
+print(
+  p_centroids
+)
+
+centroids_pdf <- file.path(
+  figures_dir,
+  "Objective4_FiveMethod_Centroids.pdf"
+)
+
+centroids_tiff <- file.path(
+  figures_dir,
+  "Objective4_FiveMethod_Centroids.tiff"
+)
+
+ggplot2::ggsave(
+  filename = centroids_pdf,
+  plot = p_centroids,
+  device = grDevices::cairo_pdf,
+  width = 11,
+  height = 8,
+  units = "in",
+  bg = "white"
+)
+
+ggplot2::ggsave(
+  filename = centroids_tiff,
+  plot = p_centroids,
+  width = 11,
+  height = 8,
+  units = "in",
+  dpi = 600,
+  compression = "lzw",
+  bg = "white"
+)
+
+# ------------------------------------------------------------
+# 18. Behavioural_Index homogeneity figure
+# ------------------------------------------------------------
+
+p_index <- ggplot2::ggplot(
+  method_profile_long,
+  ggplot2::aes(
+    x = Classification,
+    y = Behavioural_Index,
+    fill = Classification
+  )
+) +
+  ggplot2::geom_boxplot(
+    outlier.shape = NA,
+    width = 0.65
+  ) +
+  ggplot2::geom_jitter(
+    width = 0.12,
+    alpha = 0.45,
+    size = 1.4
+  ) +
+  ggplot2::facet_wrap(
+    ~ Method,
+    ncol = 3
+  ) +
+  ggplot2::labs(
+    x = NULL,
+    y = "Behavioural Index",
+    fill = NULL
+  ) +
+  ggplot2::theme_classic(
+    base_size = 12,
+    base_family = "Arial"
+  ) +
+  ggplot2::theme(
+    legend.position = "top",
+
+    axis.text.x =
+      ggplot2::element_text(
+        angle = 45,
+        hjust = 1
+      )
+  )
+
+print(
+  p_index
+)
+
+index_pdf <- file.path(
+  figures_dir,
+  "Objective4_FiveMethod_BehaviouralIndex.pdf"
+)
+
+index_tiff <- file.path(
+  figures_dir,
+  "Objective4_FiveMethod_BehaviouralIndex.tiff"
+)
+
+ggplot2::ggsave(
+  filename = index_pdf,
+  plot = p_index,
+  device = grDevices::cairo_pdf,
+  width = 11,
+  height = 7,
+  units = "in",
+  bg = "white"
+)
+
+ggplot2::ggsave(
+  filename = index_tiff,
+  plot = p_index,
+  width = 11,
+  height = 7,
+  units = "in",
+  dpi = 600,
+  compression = "lzw",
+  bg = "white"
+)
+
+# ------------------------------------------------------------
+# 19. Consensus-category behavioural-profile figure
+# ------------------------------------------------------------
+
+p_consensus_profiles <- ggplot2::ggplot(
+  consensus_behaviour_long,
+  ggplot2::aes(
+    x = Consensus_Category,
+    y = Value,
+    fill = Consensus_Category
+  )
+) +
+  ggplot2::geom_boxplot(
+    outlier.shape = NA
+  ) +
+  ggplot2::geom_jitter(
+    width = 0.12,
+    alpha = 0.50,
+    size = 1.5
+  ) +
+  ggplot2::facet_wrap(
+    ~ Variable,
+    scales = "free_y",
+    ncol = 2
+  ) +
+  ggplot2::labs(
+    x = NULL,
+    y = "Control-referenced robust behavioural value",
+    fill = NULL
+  ) +
+  ggplot2::theme_classic(
+    base_size = 12,
+    base_family = "Arial"
+  ) +
+  ggplot2::theme(
+    legend.position = "none",
+
+    axis.text.x =
+      ggplot2::element_text(
+        angle = 45,
+        hjust = 1
+      )
+  )
+
+print(
+  p_consensus_profiles
+)
+
+consensus_profiles_pdf <- file.path(
+  figures_dir,
+  "Objective4_Consensus_BehaviouralProfiles.pdf"
+)
+
+consensus_profiles_tiff <- file.path(
+  figures_dir,
+  "Objective4_Consensus_BehaviouralProfiles.tiff"
+)
+
+ggplot2::ggsave(
+  filename = consensus_profiles_pdf,
+  plot = p_consensus_profiles,
+  device = grDevices::cairo_pdf,
+  width = 11,
+  height = 8,
+  units = "in",
+  bg = "white"
+)
+
+ggplot2::ggsave(
+  filename = consensus_profiles_tiff,
+  plot = p_consensus_profiles,
+  width = 11,
+  height = 8,
+  units = "in",
+  dpi = 600,
+  compression = "lzw",
+  bg = "white"
+)
+
+# ------------------------------------------------------------
+# 20. Export tables
+# ------------------------------------------------------------
+
+comparison_xlsx <- file.path(
+  tables_dir,
+  "Objective4_FiveMethod_BehaviouralProfiles.xlsx"
+)
+
+openxlsx::write.xlsx(
+  list(
+    Individual_profiles =
+      profile_data,
+
+    Method_descriptive =
+      method_descriptive,
+
+    Method_centroids =
+      method_centroids,
+
+    Method_index_summary =
+      method_index_summary,
+
+    Kruskal_results =
+      kruskal_results,
+
+    Kruskal_effect_sizes =
+      effect_size_results,
+
+    Dunn_Holm =
+      dunn_results,
+
+    Binary_Wilcoxon =
+      binary_wilcoxon_results,
+
+    Binary_effect_sizes =
+      binary_effect_results,
+
+    Consensus_descriptive =
+      consensus_descriptive,
+
+    Consensus_centroids =
+      consensus_centroids,
+
+    Consensus_index_summary =
+      consensus_index_summary,
+
+    Consensus_Kruskal =
+      consensus_kruskal,
+
+    Consensus_effect_sizes =
+      consensus_effect_size,
+
+    Consensus_Dunn_Holm =
+      consensus_dunn
+  ),
+
+  file =
+    comparison_xlsx,
+
+  overwrite = TRUE
+)
+
+# ------------------------------------------------------------
+# 21. Save objects
+# ------------------------------------------------------------
+
+saveRDS(
+  profile_data,
+  file.path(
+    objects_dir,
+    "objective4_profile_data.rds"
+  )
+)
+
+saveRDS(
+  method_descriptive,
+  file.path(
+    objects_dir,
+    "objective4_method_behavioural_descriptive.rds"
+  )
+)
+
+saveRDS(
+  method_centroids,
+  file.path(
+    objects_dir,
+    "objective4_method_behavioural_centroids.rds"
+  )
+)
+
+saveRDS(
+  method_index_summary,
+  file.path(
+    objects_dir,
+    "objective4_method_behavioural_index_summary.rds"
+  )
+)
+
+saveRDS(
+  kruskal_results,
+  file.path(
+    objects_dir,
+    "objective4_method_kruskal_results.rds"
+  )
+)
+
+saveRDS(
+  effect_size_results,
+  file.path(
+    objects_dir,
+    "objective4_method_kruskal_effect_sizes.rds"
+  )
+)
+
+saveRDS(
+  dunn_results,
+  file.path(
+    objects_dir,
+    "objective4_method_dunn_results.rds"
+  )
+)
+
+saveRDS(
+  binary_wilcoxon_results,
+  file.path(
+    objects_dir,
+    "objective4_method_binary_wilcoxon_results.rds"
+  )
+)
+
+saveRDS(
+  binary_effect_results,
+  file.path(
+    objects_dir,
+    "objective4_method_binary_effect_sizes.rds"
+  )
+)
+
+saveRDS(
+  consensus_centroids,
+  file.path(
+    objects_dir,
+    "objective4_consensus_centroids.rds"
+  )
+)
+
+saveRDS(
+  consensus_index_summary,
+  file.path(
+    objects_dir,
+    "objective4_consensus_behavioural_index_summary.rds"
+  )
+)
+
+saveRDS(
+  consensus_kruskal,
+  file.path(
+    objects_dir,
+    "objective4_consensus_kruskal_results.rds"
+  )
+)
+
+saveRDS(
+  consensus_effect_size,
+  file.path(
+    objects_dir,
+    "objective4_consensus_effect_sizes.rds"
+  )
+)
+
+capture.output(
+  utils::sessionInfo(),
+  file = file.path(
+    objects_dir,
+    "objective4_behavioural_profiles_sessionInfo.txt"
+  )
+)
+
+# ------------------------------------------------------------
+# 22. Confirm outputs
+# ------------------------------------------------------------
+
+expected_outputs <- c(
+  comparison_xlsx,
+  method_profiles_pdf,
+  method_profiles_tiff,
+  centroids_pdf,
+  centroids_tiff,
+  index_pdf,
+  index_tiff,
+  consensus_profiles_pdf,
+  consensus_profiles_tiff
+)
+
+missing_outputs <- expected_outputs[
+  !file.exists(expected_outputs)
+]
+
+if (length(missing_outputs) > 0L) {
+  stop(
+    "The following Objective 4 behavioural-profile outputs were not created:\n",
+    paste(missing_outputs, collapse = "\n")
+  )
+}
+
+# ------------------------------------------------------------
+# 23. Final console audit
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("OBJECTIVE 4 - FIVE-METHOD BEHAVIOURAL PROFILES\n")
+cat("============================================================\n")
+
+cat("\nIntegrated dataset dimensions:\n")
+print(
+  dim(profile_data)
+)
+
+cat("\nFish per Author:\n")
+print(
+  table(
+    profile_data$Author,
+    useNA = "ifany"
+  )
+)
+
+cat("\nDuplicate Author + ID combinations:\n")
+print(
+  sum(
+    duplicated(
+      profile_data[c("Author", "ID")]
+    )
+  )
+)
+
+cat("\nDuplicate Traceability_ID values:\n")
+print(
+  sum(
+    duplicated(
+      profile_data$Traceability_ID
+    )
+  )
+)
+
+cat("\nBehavioural source:\n")
+cat(
+  behaviour_file,
+  "\n"
+)
+
+cat("\nCorrected behavioural variables:\n")
+print(
+  behaviour_variables
+)
+
+cat("\nClass sizes by method:\n")
+
+for (method_i in methods) {
+  cat(
+    "\n",
+    method_i,
+    "\n",
+    sep = ""
+  )
+
+  print(
+    table(
+      factor(
+        profile_data[[method_i]],
+        levels = allowed_labels
+      ),
+      useNA = "ifany"
+    )
+  )
+}
+
+cat("\nObserved number of classes by method:\n")
+print(
+  observed_class_counts,
+  n = Inf,
+  width = Inf
+)
+
+cat("\nBehavioural centroids by method and class:\n")
+print(
+  method_centroids,
+  n = Inf,
+  width = Inf
+)
+
+cat("\nBehavioural_Index summary by method and class:\n")
+print(
+  method_index_summary,
+  n = Inf,
+  width = Inf
+)
+
+cat("\nKruskal-Wallis results:\n")
+print(
+  kruskal_results,
+  n = Inf,
+  width = Inf
+)
+
+cat("\nKruskal-Wallis effect sizes:\n")
+print(
+  effect_size_results,
+  n = Inf,
+  width = Inf
+)
+
+cat("\nDunn-Holm results for three-class methods:\n")
+print(
+  dunn_results,
+  n = Inf,
+  width = Inf
+)
+
+cat("\nBinary-method Wilcoxon comparisons:\n")
+print(
+  binary_wilcoxon_results,
+  n = Inf,
+  width = Inf
+)
+
+cat("\nBinary-method effect sizes:\n")
+print(
+  binary_effect_results,
+  n = Inf,
+  width = Inf
+)
+
+cat("\nConsensus-category sizes:\n")
+print(
+  table(
+    profile_data$Consensus_Category,
+    useNA = "ifany"
+  )
+)
+
+cat("\nConsensus-category centroids:\n")
+print(
+  consensus_centroids,
+  n = Inf,
+  width = Inf
+)
+
+cat("\nConsensus Behavioural_Index summary:\n")
+print(
+  consensus_index_summary,
+  n = Inf,
+  width = Inf
+)
+
+cat("\nConsensus-category Kruskal-Wallis results:\n")
+print(
+  consensus_kruskal,
+  n = Inf,
+  width = Inf
+)
+
+cat("\nConsensus-category effect sizes:\n")
+print(
+  consensus_effect_size,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nThe invalid Euclidean distance-to-origin metric from the historical ",
+  "script was not calculated.\n",
+  "Zero in the corrected robust space is the Author-specific Control median ",
+  "for each variable, not the pooled Control atlas centroid.\n",
+  sep = ""
+)
+
+cat(
+  "\nNo classification method was recalculated in this script.\n",
+  "All five classifications were inherited from Script 034 and merged with ",
+  "the definitive Objective 3 robust behavioural coordinates by ",
+  "Author + ID / Traceability_ID.\n",
+  sep = ""
+)
+
+cat("\nOutputs saved successfully.\n")
+cat("\n============================================================\n")
