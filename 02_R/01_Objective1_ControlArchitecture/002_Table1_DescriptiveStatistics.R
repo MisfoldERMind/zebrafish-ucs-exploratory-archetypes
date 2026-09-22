@@ -1,0 +1,433 @@
+# ============================================================
+# 002_Table1_DescriptiveStatistics.R
+#
+# Objective 1
+# Descriptive statistics of the LAPCOM control population
+# ============================================================
+
+# ------------------------------------------------------------
+# 1. Project directory
+# ------------------------------------------------------------
+
+base_dir <- paste0(
+  "C:/Users/USER/Documents/",
+  "LAPCOM_UCS_Resilience"
+)
+
+if (!dir.exists(base_dir)) {
+  stop(
+    "Project directory not found:\n",
+    base_dir
+  )
+}
+
+setwd(base_dir)
+
+# ------------------------------------------------------------
+# 2. Required packages
+# ------------------------------------------------------------
+
+required_packages <- c(
+  "dplyr",
+  "tidyr",
+  "openxlsx"
+)
+
+missing_packages <- required_packages[
+  !vapply(
+    required_packages,
+    requireNamespace,
+    logical(1),
+    quietly = TRUE
+  )
+]
+
+if (length(missing_packages) > 0) {
+  stop(
+    "Install the following packages before running the script:\n",
+    paste(
+      missing_packages,
+      collapse = ", "
+    )
+  )
+}
+
+library(dplyr)
+library(tidyr)
+library(openxlsx)
+
+# ------------------------------------------------------------
+# 3. Load the LAPCOM control population
+# ------------------------------------------------------------
+
+control_file <- file.path(
+  "01_Data",
+  "Processed",
+  "control.rds"
+)
+
+if (!file.exists(control_file)) {
+  stop(
+    "The control dataset was not found:\n",
+    control_file,
+    "\nRun 001_load_lapcom_data.R before this script."
+  )
+}
+
+control <- readRDS(
+  control_file
+)
+
+if (!is.data.frame(control)) {
+  stop(
+    "The object stored in control.rds is not a data frame."
+  )
+}
+
+# ------------------------------------------------------------
+# 4. Integrity checks for the control dataset
+# ------------------------------------------------------------
+
+vars <- c(
+  "distance",
+  "crossing",
+  "top_entry",
+  "top_time"
+)
+
+required_columns <- c(
+  "Author",
+  "ID",
+  "Treatment",
+  vars
+)
+
+missing_columns <- setdiff(
+  required_columns,
+  names(control)
+)
+
+unexpected_columns <- setdiff(
+  names(control),
+  required_columns
+)
+
+if (length(missing_columns) > 0) {
+  stop(
+    "The following columns are missing from control.rds:\n",
+    paste(
+      missing_columns,
+      collapse = ", "
+    )
+  )
+}
+
+if (length(unexpected_columns) > 0) {
+  stop(
+    "Unexpected columns were found in control.rds:\n",
+    paste(
+      unexpected_columns,
+      collapse = ", "
+    ),
+    "\nRegenerate control.rds with 001_load_lapcom_data.R."
+  )
+}
+
+expected_control_n <- 89L
+
+if (nrow(control) != expected_control_n) {
+  stop(
+    "control.rds must contain exactly ",
+    expected_control_n,
+    " control fish; found ",
+    nrow(control),
+    "."
+  )
+}
+
+if (anyNA(control[required_columns])) {
+  missing_by_column <- vapply(
+    control[required_columns],
+    function(x) sum(is.na(x)),
+    integer(1)
+  )
+
+  missing_by_column <- missing_by_column[
+    missing_by_column > 0
+  ]
+
+  stop(
+    "Missing values were found in control.rds:\n",
+    paste(
+      paste0(
+        names(missing_by_column),
+        " = ",
+        missing_by_column
+      ),
+      collapse = "\n"
+    )
+  )
+}
+
+blank_identifier <- vapply(
+  control[c("Author", "ID", "Treatment")],
+  function(x) any(trimws(as.character(x)) == ""),
+  logical(1)
+)
+
+if (any(blank_identifier)) {
+  stop(
+    "Blank values were found in the following identifier columns:\n",
+    paste(
+      names(blank_identifier)[blank_identifier],
+      collapse = ", "
+    )
+  )
+}
+
+if (!all(as.character(control$Treatment) == "Control")) {
+  stop(
+    "control.rds contains observations whose Treatment is not 'Control'."
+  )
+}
+
+expected_cohort_n <- 4L
+observed_cohort_n <- dplyr::n_distinct(control$Author)
+
+if (observed_cohort_n != expected_cohort_n) {
+  stop(
+    "control.rds must contain exactly ",
+    expected_cohort_n,
+    " cohorts in Author; found ",
+    observed_cohort_n,
+    "."
+  )
+}
+
+duplicate_key <- duplicated(
+  control[c("Author", "ID")]
+)
+
+if (any(duplicate_key)) {
+  duplicate_rows <- which(duplicate_key)
+
+  stop(
+    "Duplicated Author + ID keys were found at row(s): ",
+    paste(
+      duplicate_rows,
+      collapse = ", "
+    )
+  )
+}
+
+non_numeric_vars <- vars[
+  !vapply(
+    control[vars],
+    is.numeric,
+    logical(1)
+  )
+]
+
+if (length(non_numeric_vars) > 0) {
+  stop(
+    "The following behavioural variables are not numeric:\n",
+    paste(
+      non_numeric_vars,
+      collapse = ", "
+    )
+  )
+}
+
+non_finite_vars <- vars[
+  vapply(
+    control[vars],
+    function(x) any(!is.finite(x)),
+    logical(1)
+  )
+]
+
+if (length(non_finite_vars) > 0) {
+  stop(
+    "The following behavioural variables contain non-finite values:\n",
+    paste(
+      non_finite_vars,
+      collapse = ", "
+    )
+  )
+}
+
+negative_vars <- vars[
+  vapply(
+    control[vars],
+    function(x) any(x < 0),
+    logical(1)
+  )
+]
+
+if (length(negative_vars) > 0) {
+  stop(
+    "The following behavioural variables contain negative values:\n",
+    paste(
+      negative_vars,
+      collapse = ", "
+    )
+  )
+}
+
+cohort_counts <- control %>%
+  dplyr::count(
+    Author,
+    name = "n"
+  ) %>%
+  dplyr::arrange(
+    Author
+  )
+
+# ------------------------------------------------------------
+# 5. Descriptive statistics of the raw behavioural variables
+# ------------------------------------------------------------
+
+table1 <- control %>%
+  dplyr::select(
+    dplyr::all_of(vars)
+  ) %>%
+  tidyr::pivot_longer(
+    cols = dplyr::everything(),
+    names_to = "Variable",
+    values_to = "Value"
+  ) %>%
+  dplyr::mutate(
+    Variable = factor(
+      Variable,
+      levels = vars
+    )
+  ) %>%
+  dplyr::group_by(
+    Variable
+  ) %>%
+  dplyr::summarise(
+    n = dplyr::n(),
+    Mean = mean(Value),
+    SD = stats::sd(Value),
+    Median = stats::median(Value),
+    IQR = stats::IQR(Value),
+    Minimum = min(Value),
+    Maximum = max(Value),
+    .groups = "drop"
+  ) %>%
+  dplyr::mutate(
+    Variable = as.character(Variable)
+  )
+
+if (
+  nrow(table1) != length(vars) ||
+  !identical(table1$Variable, vars) ||
+  !all(table1$n == expected_control_n)
+) {
+  stop(
+    "The structure of Table 1 does not match the expected audit conditions."
+  )
+}
+
+# ------------------------------------------------------------
+# 6. Audit output
+# ------------------------------------------------------------
+
+cat(
+  "\n============================================================\n"
+)
+
+cat(
+  "TABLE 1 — LAPCOM CONTROL POPULATION\n"
+)
+
+cat(
+  "============================================================\n"
+)
+
+cat(
+  "\nNumber of control fish: ",
+  nrow(control),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Number of cohorts: ",
+  observed_cohort_n,
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nControl fish by cohort:\n"
+)
+
+print(
+  cohort_counts,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nDescriptive statistics of raw behavioural variables:\n"
+)
+
+print(
+  table1,
+  n = Inf,
+  width = Inf
+)
+
+# ------------------------------------------------------------
+# 7. Export Table 1
+# ------------------------------------------------------------
+
+output_dir <- file.path(
+  "03_Results",
+  "Tables"
+)
+
+if (!dir.exists(output_dir)) {
+  dir.create(
+    output_dir,
+    recursive = TRUE
+  )
+}
+
+output_file <- file.path(
+  output_dir,
+  "Table1_DescriptiveStatistics.xlsx"
+)
+
+openxlsx::write.xlsx(
+  table1,
+  file = output_file,
+  overwrite = TRUE
+)
+
+if (!file.exists(output_file)) {
+  stop(
+    "Table 1 was not created at the expected path:\n",
+    output_file
+  )
+}
+
+cat(
+  "\nTable saved at:\n",
+  normalizePath(
+    output_file,
+    winslash = "/",
+    mustWork = TRUE
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nAll integrity checks passed.\n"
+)
+
+cat(
+  "\n============================================================\n"
+)
