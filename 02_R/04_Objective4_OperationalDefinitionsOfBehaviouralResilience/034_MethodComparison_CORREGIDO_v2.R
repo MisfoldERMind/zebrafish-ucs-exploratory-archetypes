@@ -32,14 +32,7 @@ cat("\nRunning: ", script_version, "\n", sep = "")
 # 0. Project directory, packages, seed, outputs
 # ------------------------------------------------------------
 
-project_root <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+project_root <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(project_root)) {
   stop("Project directory not found:\n", project_root)
@@ -1005,3 +998,969 @@ kappa_matrix <- create_symmetric_matrix(
 method_data <- method_data %>%
   dplyr::rowwise() %>%
   dplyr::mutate(
+    n_Resilient =
+      sum(
+        c_across(
+          dplyr::all_of(methods)
+        ) == "Resilient"
+      ),
+
+    n_Susceptible =
+      sum(
+        c_across(
+          dplyr::all_of(methods)
+        ) == "Susceptible"
+      ),
+
+    n_Intermediate =
+      sum(
+        c_across(
+          dplyr::all_of(methods)
+        ) == "Intermediate"
+      ),
+
+    Resilience_Consensus_Score =
+      n_Resilient /
+      length(methods),
+
+    Susceptibility_Consensus_Score =
+      n_Susceptible /
+      length(methods),
+
+    Intermediate_Consensus_Score =
+      n_Intermediate /
+      length(methods)
+  ) %>%
+  dplyr::ungroup()
+
+if (
+  any(
+    method_data$n_Resilient +
+      method_data$n_Susceptible +
+      method_data$n_Intermediate !=
+      length(methods)
+  )
+) {
+  stop(
+    "Consensus counts do not sum to five methods."
+  )
+}
+
+# ------------------------------------------------------------
+# 11. Consensus categories
+# ------------------------------------------------------------
+
+method_data <- method_data %>%
+  dplyr::mutate(
+    Consensus_Category =
+      dplyr::case_when(
+        n_Susceptible == 5L ~
+          "Unanimous susceptible",
+
+        n_Resilient == 5L ~
+          "Unanimous resilient",
+
+        n_Susceptible == 4L ~
+          "High-consensus susceptible",
+
+        n_Resilient == 4L ~
+          "High-consensus resilient",
+
+        TRUE ~
+          "Ambiguous/intermediate"
+      ),
+
+    Consensus_Category = factor(
+      Consensus_Category,
+      levels = c(
+        "Unanimous susceptible",
+        "High-consensus susceptible",
+        "Ambiguous/intermediate",
+        "High-consensus resilient",
+        "Unanimous resilient"
+      )
+    )
+  )
+
+# ------------------------------------------------------------
+# 12. Individual consensus tables
+# ------------------------------------------------------------
+
+unanimous_susceptible <- method_data %>%
+  dplyr::filter(
+    n_Susceptible == 5L
+  )
+
+high_consensus_susceptible <- method_data %>%
+  dplyr::filter(
+    n_Susceptible == 4L
+  )
+
+ambiguous_individuals <- method_data %>%
+  dplyr::filter(
+    Consensus_Category ==
+      "Ambiguous/intermediate"
+  )
+
+high_consensus_resilient <- method_data %>%
+  dplyr::filter(
+    n_Resilient == 4L
+  )
+
+unanimous_resilient <- method_data %>%
+  dplyr::filter(
+    n_Resilient == 5L
+  )
+
+# ------------------------------------------------------------
+# 13. Long-format dataset and method sizes
+# ------------------------------------------------------------
+
+method_long <- method_data %>%
+  dplyr::select(
+    Author,
+    ID,
+    Traceability_ID,
+    Behavioural_Index,
+    dplyr::all_of(methods)
+  ) %>%
+  tidyr::pivot_longer(
+    cols =
+      dplyr::all_of(methods),
+
+    names_to =
+      "Method",
+
+    values_to =
+      "Classification"
+  ) %>%
+  dplyr::mutate(
+    Method = factor(
+      Method,
+      levels = methods
+    ),
+
+    Classification = factor(
+      Classification,
+      levels = allowed_labels
+    )
+  )
+
+method_size_table <- method_long %>%
+  dplyr::count(
+    Method,
+    Classification,
+    name = "n",
+    .drop = FALSE
+  ) %>%
+  dplyr::group_by(
+    Method
+  ) %>%
+  dplyr::mutate(
+    Percentage =
+      100 *
+      n /
+      sum(n)
+  ) %>%
+  dplyr::ungroup()
+
+method_size_wide <- method_size_table %>%
+  dplyr::select(
+    Method,
+    Classification,
+    n
+  ) %>%
+  tidyr::pivot_wider(
+    names_from =
+      Classification,
+
+    values_from =
+      n,
+
+    values_fill =
+      0
+  )
+
+# ------------------------------------------------------------
+# 14. Heatmap helper
+# ------------------------------------------------------------
+
+matrix_to_long <- function(
+  matrix_object,
+  value_name
+) {
+
+  as.data.frame(
+    as.table(
+      matrix_object
+    )
+  ) %>%
+    dplyr::rename(
+      Method_1 = Var1,
+      Method_2 = Var2,
+      !!value_name := Freq
+    ) %>%
+    dplyr::mutate(
+      Method_1 = factor(
+        Method_1,
+        levels = methods
+      ),
+
+      Method_2 = factor(
+        Method_2,
+        levels = rev(methods)
+      )
+    )
+}
+
+ari_long <- matrix_to_long(
+  ari_matrix,
+  "ARI"
+) %>%
+  dplyr::mutate(
+    Text_colour = ifelse(
+      ARI >= 0.60,
+      "white",
+      "black"
+    )
+  )
+
+exact_agreement_long <- matrix_to_long(
+  exact_agreement_matrix,
+  "Exact_Agreement"
+) %>%
+  dplyr::mutate(
+    Text_colour = ifelse(
+      Exact_Agreement >= 70,
+      "white",
+      "black"
+    )
+  )
+
+cramers_long <- matrix_to_long(
+  cramers_v_matrix,
+  "Cramers_V"
+) %>%
+  dplyr::mutate(
+    Text_colour = ifelse(
+      Cramers_V >= 0.60,
+      "white",
+      "black"
+    )
+  )
+
+kappa_long <- matrix_to_long(
+  kappa_matrix,
+  "Kappa"
+) %>%
+  dplyr::mutate(
+    Text_colour = ifelse(
+      Kappa >= 0.60,
+      "white",
+      "black"
+    )
+  )
+
+# ------------------------------------------------------------
+# 15. Heatmap constructor
+# ------------------------------------------------------------
+
+make_heatmap <- function(
+  data,
+  value_column,
+  label_digits,
+  legend_title,
+  limits,
+  text_threshold,
+  filename_stub
+) {
+
+  data <- data %>%
+    dplyr::mutate(
+      Text_colour =
+        ifelse(
+          .data[[value_column]] >=
+            text_threshold,
+          "white",
+          "black"
+        )
+    )
+
+  label_format <- paste0(
+    "%.",
+    label_digits,
+    "f"
+  )
+
+  p <- ggplot2::ggplot(
+    data,
+    ggplot2::aes(
+      x = Method_1,
+      y = Method_2,
+      fill = .data[[value_column]]
+    )
+  ) +
+    ggplot2::geom_tile(
+      colour = "white"
+    ) +
+    ggplot2::geom_text(
+      ggplot2::aes(
+        label = sprintf(
+          label_format,
+          .data[[value_column]]
+        ),
+        colour = Text_colour
+      ),
+      family = "Arial",
+      size = 4,
+      show.legend = FALSE
+    ) +
+    ggplot2::scale_colour_identity() +
+    ggplot2::scale_fill_gradient(
+      low = "white",
+      high = "black",
+      limits = limits
+    ) +
+    ggplot2::labs(
+      x = NULL,
+      y = NULL,
+      fill = legend_title
+    ) +
+    ggplot2::coord_equal() +
+    ggplot2::theme_minimal(
+      base_size = 13,
+      base_family = "Arial"
+    ) +
+    ggplot2::theme(
+      panel.grid =
+        ggplot2::element_blank(),
+
+      axis.text.x =
+        ggplot2::element_text(
+          angle = 45,
+          hjust = 1
+        )
+    )
+
+  print(p)
+
+  ggplot2::ggsave(
+    filename = file.path(
+      figures_dir,
+      paste0(
+        filename_stub,
+        ".pdf"
+      )
+    ),
+    plot = p,
+    device = grDevices::cairo_pdf,
+    width = 7,
+    height = 6,
+    units = "in",
+    bg = "white"
+  )
+
+  ggplot2::ggsave(
+    filename = file.path(
+      figures_dir,
+      paste0(
+        filename_stub,
+        ".tiff"
+      )
+    ),
+    plot = p,
+    width = 7,
+    height = 6,
+    units = "in",
+    dpi = 600,
+    compression = "lzw",
+    bg = "white"
+  )
+
+  p
+}
+
+# ------------------------------------------------------------
+# 16. Agreement heatmaps
+# ------------------------------------------------------------
+
+p_ari <- make_heatmap(
+  data = ari_long,
+  value_column = "ARI",
+  label_digits = 2,
+  legend_title = "ARI",
+  limits = c(
+    min(
+      ari_long$ARI,
+      na.rm = TRUE
+    ),
+    1
+  ),
+  text_threshold = 0.60,
+  filename_stub = "Objective4_ARI_Heatmap"
+)
+
+p_exact_agreement <- make_heatmap(
+  data = exact_agreement_long,
+  value_column = "Exact_Agreement",
+  label_digits = 1,
+  legend_title = "Exact agreement (%)",
+  limits = c(
+    min(
+      exact_agreement_long$Exact_Agreement,
+      na.rm = TRUE
+    ),
+    100
+  ),
+  text_threshold = 70,
+  filename_stub = "Objective4_ExactAgreement_Heatmap"
+)
+
+p_cramers <- make_heatmap(
+  data = cramers_long,
+  value_column = "Cramers_V",
+  label_digits = 2,
+  legend_title = "Cramer's V",
+  limits = c(
+    min(
+      cramers_long$Cramers_V,
+      na.rm = TRUE
+    ),
+    1
+  ),
+  text_threshold = 0.60,
+  filename_stub = "Objective4_CramersV_Heatmap"
+)
+
+p_kappa <- make_heatmap(
+  data = kappa_long,
+  value_column = "Kappa",
+  label_digits = 2,
+  legend_title = "Cohen's kappa",
+  limits = c(
+    min(
+      kappa_long$Kappa,
+      na.rm = TRUE
+    ),
+    1
+  ),
+  text_threshold = 0.60,
+  filename_stub = "Objective4_Kappa_Heatmap"
+)
+
+# ------------------------------------------------------------
+# 17. Consensus-score data and figure
+# ------------------------------------------------------------
+
+consensus_long <- method_data %>%
+  dplyr::select(
+    Author,
+    ID,
+    Traceability_ID,
+    Resilience_Consensus_Score,
+    Susceptibility_Consensus_Score
+  ) %>%
+  tidyr::pivot_longer(
+    cols = c(
+      Resilience_Consensus_Score,
+      Susceptibility_Consensus_Score
+    ),
+
+    names_to =
+      "Consensus_Type",
+
+    values_to =
+      "Consensus_Score"
+  )
+
+consensus_plot_data <- consensus_long %>%
+  dplyr::count(
+    Consensus_Type,
+    Consensus_Score,
+    name = "n"
+  ) %>%
+  tidyr::complete(
+    Consensus_Type,
+
+    Consensus_Score =
+      seq(
+        0,
+        1,
+        by = 0.2
+      ),
+
+    fill = list(
+      n = 0
+    )
+  )
+
+p_consensus <- ggplot2::ggplot(
+  consensus_plot_data,
+  ggplot2::aes(
+    x = factor(
+      Consensus_Score,
+      levels = seq(
+        0,
+        1,
+        by = 0.2
+      )
+    ),
+    y = n,
+    fill = Consensus_Type
+  )
+) +
+  ggplot2::geom_col(
+    position =
+      ggplot2::position_dodge(
+        width = 0.8
+      ),
+    width = 0.7,
+    colour = "black"
+  ) +
+  ggplot2::labs(
+    x = "Consensus score",
+    y = "Number of individuals",
+    fill = NULL
+  ) +
+  ggplot2::theme_classic(
+    base_size = 14,
+    base_family = "Arial"
+  ) +
+  ggplot2::theme(
+    legend.position = "top"
+  )
+
+print(p_consensus)
+
+ggplot2::ggsave(
+  filename = file.path(
+    figures_dir,
+    "Objective4_ConsensusScores.pdf"
+  ),
+  plot = p_consensus,
+  device = grDevices::cairo_pdf,
+  width = 7.5,
+  height = 5.5,
+  units = "in",
+  bg = "white"
+)
+
+ggplot2::ggsave(
+  filename = file.path(
+    figures_dir,
+    "Objective4_ConsensusScores.tiff"
+  ),
+  plot = p_consensus,
+  width = 7.5,
+  height = 5.5,
+  units = "in",
+  dpi = 600,
+  compression = "lzw",
+  bg = "white"
+)
+
+# ------------------------------------------------------------
+# 18. Export Excel workbook
+# ------------------------------------------------------------
+
+export_list <- c(
+  list(
+    Pairwise_results =
+      pairwise_table,
+
+    ARI_matrix =
+      data.frame(
+        Method =
+          rownames(
+            ari_matrix
+          ),
+        ari_matrix,
+        check.names = FALSE
+      ),
+
+    ExactAgreement_matrix =
+      data.frame(
+        Method =
+          rownames(
+            exact_agreement_matrix
+          ),
+        exact_agreement_matrix,
+        check.names = FALSE
+      ),
+
+    CramersV_matrix =
+      data.frame(
+        Method =
+          rownames(
+            cramers_v_matrix
+          ),
+        cramers_v_matrix,
+        check.names = FALSE
+      ),
+
+    Kappa_matrix =
+      data.frame(
+        Method =
+          rownames(
+            kappa_matrix
+          ),
+        kappa_matrix,
+        check.names = FALSE
+      ),
+
+    Method_sizes_long =
+      method_size_table,
+
+    Method_sizes_wide =
+      method_size_wide,
+
+    Individual_consensus =
+      method_data,
+
+    Consensus_plot_data =
+      consensus_plot_data,
+
+    Unanimous_susceptible =
+      unanimous_susceptible,
+
+    High_consensus_susceptible =
+      high_consensus_susceptible,
+
+    Ambiguous_intermediate =
+      ambiguous_individuals,
+
+    High_consensus_resilient =
+      high_consensus_resilient,
+
+    Unanimous_resilient =
+      unanimous_resilient
+  ),
+  contingency_export
+)
+
+comparison_xlsx <- file.path(
+  tables_dir,
+  "Objective4_FiveMethodComparison.xlsx"
+)
+
+openxlsx::write.xlsx(
+  export_list,
+  file = comparison_xlsx,
+  overwrite = TRUE
+)
+
+# ------------------------------------------------------------
+# 19. Save objects
+# ------------------------------------------------------------
+
+saveRDS(
+  method_data,
+  file.path(
+    objects_dir,
+    "objective4_five_method_classifications.rds"
+  )
+)
+
+saveRDS(
+  pairwise_table,
+  file.path(
+    objects_dir,
+    "objective4_pairwise_method_comparison.rds"
+  )
+)
+
+saveRDS(
+  ari_matrix,
+  file.path(
+    objects_dir,
+    "objective4_ari_matrix.rds"
+  )
+)
+
+saveRDS(
+  exact_agreement_matrix,
+  file.path(
+    objects_dir,
+    "objective4_exact_agreement_matrix.rds"
+  )
+)
+
+saveRDS(
+  cramers_v_matrix,
+  file.path(
+    objects_dir,
+    "objective4_cramers_v_matrix.rds"
+  )
+)
+
+saveRDS(
+  kappa_matrix,
+  file.path(
+    objects_dir,
+    "objective4_kappa_matrix.rds"
+  )
+)
+
+saveRDS(
+  method_size_table,
+  file.path(
+    objects_dir,
+    "objective4_five_method_size_table_long.rds"
+  )
+)
+
+saveRDS(
+  method_size_wide,
+  file.path(
+    objects_dir,
+    "objective4_five_method_size_table_wide.rds"
+  )
+)
+
+saveRDS(
+  method_long,
+  file.path(
+    objects_dir,
+    "objective4_method_classifications_long.rds"
+  )
+)
+
+saveRDS(
+  consensus_plot_data,
+  file.path(
+    objects_dir,
+    "objective4_consensus_plot_data.rds"
+  )
+)
+
+capture.output(
+  utils::sessionInfo(),
+  file = file.path(
+    objects_dir,
+    "objective4_method_comparison_sessionInfo.txt"
+  )
+)
+
+# ------------------------------------------------------------
+# 20. Confirm outputs
+# ------------------------------------------------------------
+
+expected_outputs <- c(
+  comparison_xlsx,
+
+  file.path(
+    figures_dir,
+    "Objective4_ARI_Heatmap.pdf"
+  ),
+
+  file.path(
+    figures_dir,
+    "Objective4_ARI_Heatmap.tiff"
+  ),
+
+  file.path(
+    figures_dir,
+    "Objective4_ExactAgreement_Heatmap.pdf"
+  ),
+
+  file.path(
+    figures_dir,
+    "Objective4_ExactAgreement_Heatmap.tiff"
+  ),
+
+  file.path(
+    figures_dir,
+    "Objective4_CramersV_Heatmap.pdf"
+  ),
+
+  file.path(
+    figures_dir,
+    "Objective4_CramersV_Heatmap.tiff"
+  ),
+
+  file.path(
+    figures_dir,
+    "Objective4_Kappa_Heatmap.pdf"
+  ),
+
+  file.path(
+    figures_dir,
+    "Objective4_Kappa_Heatmap.tiff"
+  ),
+
+  file.path(
+    figures_dir,
+    "Objective4_ConsensusScores.pdf"
+  ),
+
+  file.path(
+    figures_dir,
+    "Objective4_ConsensusScores.tiff"
+  )
+)
+
+missing_outputs <- expected_outputs[
+  !file.exists(expected_outputs)
+]
+
+if (length(missing_outputs) > 0L) {
+  stop(
+    "The following Objective 4 comparison outputs were not created:\n",
+    paste(missing_outputs, collapse = "\n")
+  )
+}
+
+# ------------------------------------------------------------
+# 21. Final console audit
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("OBJECTIVE 4 - FIVE-METHOD COMPARISON\n")
+cat("============================================================\n")
+
+cat("\nIntegrated dataset dimensions:\n")
+print(
+  dim(method_data)
+)
+
+cat("\nFish per Author:\n")
+print(
+  table(
+    method_data$Author,
+    useNA = "ifany"
+  )
+)
+
+cat("\nDuplicate Author + ID combinations:\n")
+print(
+  sum(
+    duplicated(
+      method_data[c("Author", "ID")]
+    )
+  )
+)
+
+cat("\nDuplicate Traceability_ID values:\n")
+print(
+  sum(
+    duplicated(
+      method_data$Traceability_ID
+    )
+  )
+)
+
+cat("\nMaximum absolute Behavioural_Index difference across methods:\n")
+print(
+  index_difference_by_method
+)
+
+cat("\nClass sizes by method:\n")
+
+for (m in methods) {
+  cat(
+    "\n",
+    m,
+    "\n",
+    sep = ""
+  )
+
+  print(
+    table(
+      factor(
+        method_data[[m]],
+        levels = allowed_labels
+      ),
+      useNA = "ifany"
+    )
+  )
+}
+
+cat("\nPairwise method comparison:\n")
+print(
+  tibble::as_tibble(
+    pairwise_table
+  ),
+  n = Inf,
+  width = Inf
+)
+
+cat("\nARI matrix:\n")
+print(
+  round(
+    ari_matrix,
+    3
+  )
+)
+
+cat("\nExact label agreement matrix (%):\n")
+print(
+  round(
+    exact_agreement_matrix,
+    1
+  )
+)
+
+cat("\nCramer's V matrix:\n")
+print(
+  round(
+    cramers_v_matrix,
+    3
+  )
+)
+
+cat("\nCohen's kappa matrix:\n")
+print(
+  round(
+    kappa_matrix,
+    3
+  )
+)
+
+cat("\nFive-method size table:\n")
+print(
+  method_size_wide,
+  n = Inf,
+  width = Inf
+)
+
+cat("\nConsensus-category distribution:\n")
+print(
+  table(
+    method_data$Consensus_Category,
+    useNA = "ifany"
+  )
+)
+
+cat("\nResilience-consensus score distribution:\n")
+print(
+  table(
+    method_data$Resilience_Consensus_Score,
+    useNA = "ifany"
+  )
+)
+
+cat("\nSusceptibility-consensus score distribution:\n")
+print(
+  table(
+    method_data$Susceptibility_Consensus_Score,
+    useNA = "ifany"
+  )
+)
+
+cat("\nIntermediate-consensus score distribution:\n")
+print(
+  table(
+    method_data$Intermediate_Consensus_Score,
+    useNA = "ifany"
+  )
+)
+
+cat(
+  "\nNo classification method was recalculated in this script.\n",
+  "All five individual classifications were inherited from the ",
+  "corrected Objective 4 objects and merged by Author + ID / Traceability_ID.\n",
+  sep = ""
+)
+
+cat("\nOutputs saved successfully.\n")
+cat("\n============================================================\n")
