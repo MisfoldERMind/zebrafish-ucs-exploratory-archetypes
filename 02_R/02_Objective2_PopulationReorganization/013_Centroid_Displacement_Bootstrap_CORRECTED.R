@@ -28,14 +28,7 @@
 # 1. Project directory
 # ------------------------------------------------------------
 
-project_root <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+project_root <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(project_root)) {
   stop(
@@ -1005,3 +998,579 @@ bootstrap_results <- matrix(
   NA_real_,
   nrow = B,
   ncol = length(bootstrap_result_names),
+  dimnames = list(
+    NULL,
+    bootstrap_result_names
+  )
+)
+
+control_raw_by_author <- split(
+  control_raw,
+  factor(
+    control_raw$Author,
+    levels = expected_authors
+  ),
+  drop = TRUE
+)
+
+stress_raw_by_author <- split(
+  stress_raw,
+  factor(
+    stress_raw$Author,
+    levels = expected_authors
+  ),
+  drop = TRUE
+)
+
+if (
+  !identical(names(control_raw_by_author), expected_authors) ||
+  !identical(names(stress_raw_by_author), expected_authors)
+) {
+  stop(
+    "The bootstrap strata could not be constructed for all four Authors."
+  )
+}
+
+resample_author_strata <- function(strata_list) {
+  sampled_strata <- lapply(
+    strata_list,
+    function(stratum_i) {
+      stratum_n <- nrow(stratum_i)
+
+      stratum_i[
+        sample.int(
+          n = stratum_n,
+          size = stratum_n,
+          replace = TRUE
+        ),
+        ,
+        drop = FALSE
+      ]
+    }
+  )
+
+  result <- dplyr::bind_rows(
+    sampled_strata
+  )
+
+  rownames(result) <- NULL
+  result
+}
+
+valid_bootstrap_replicates <- 0L
+total_bootstrap_attempts <- 0L
+invalid_bootstrap_attempts <- 0L
+
+while (
+  valid_bootstrap_replicates < B &&
+  total_bootstrap_attempts < maximum_bootstrap_attempts
+) {
+
+  total_bootstrap_attempts <- total_bootstrap_attempts + 1L
+
+  control_boot <- resample_author_strata(
+    control_raw_by_author
+  )
+
+  stress_boot <- resample_author_strata(
+    stress_raw_by_author
+  )
+
+  bootstrap_result_i <- calculate_bootstrap_displacement(
+    control_boot = control_boot,
+    stress_boot = stress_boot,
+    variable_names = behavioural_variables,
+    author_values = expected_authors
+  )
+
+  bootstrap_result_i <- bootstrap_result_i[
+    bootstrap_result_names
+  ]
+
+  if (
+    length(bootstrap_result_i) ==
+      length(bootstrap_result_names) &&
+    all(is.finite(bootstrap_result_i)) &&
+    bootstrap_result_i["Distance"] >= 0
+  ) {
+    valid_bootstrap_replicates <-
+      valid_bootstrap_replicates + 1L
+
+    bootstrap_results[
+      valid_bootstrap_replicates,
+    ] <- bootstrap_result_i
+  } else {
+    invalid_bootstrap_attempts <-
+      invalid_bootstrap_attempts + 1L
+  }
+}
+
+if (valid_bootstrap_replicates != B) {
+  stop(
+    "Only ",
+    valid_bootstrap_replicates,
+    " valid bootstrap replicates were obtained after ",
+    total_bootstrap_attempts,
+    " attempts. The frequency of zero Author-specific resampled ",
+    "Control MADs is too high for this conditional bootstrap."
+  )
+}
+
+invalid_bootstrap_attempt_fraction <-
+  invalid_bootstrap_attempts /
+  total_bootstrap_attempts
+
+if (
+  any(!stats::complete.cases(bootstrap_results)) ||
+  any(!is.finite(bootstrap_results))
+) {
+  stop(
+    "The retained bootstrap matrix contains incomplete or non-finite ",
+    "estimates."
+  )
+}
+
+boot_distance <- bootstrap_results[, "Distance"]
+
+if (
+  length(boot_distance) != B ||
+  any(!is.finite(boot_distance)) ||
+  any(boot_distance < 0)
+) {
+  stop(
+    "The bootstrap distance distribution is invalid."
+  )
+}
+
+# ------------------------------------------------------------
+# 10. Summarise the total 4D displacement
+# ------------------------------------------------------------
+
+distance_ci <- stats::quantile(
+  boot_distance,
+  probs = ci_probabilities,
+  names = FALSE,
+  type = 7
+)
+
+centroid_bootstrap_summary <- tibble::tibble(
+  Comparison = "Stress minus Control",
+  Space = "Four-dimensional control-referenced robust behavioural space",
+  Bootstrap_scheme = paste0(
+    "Independent resampling within Author x Treatment strata with ",
+    "replicate-specific re-estimation of the Control median and ",
+    "scaled MAD within each Author; attempts with a zero or ",
+    "non-finite Author-specific Control MAD were recorded and redrawn"
+  ),
+  Interval_method = paste0(
+    100 * confidence_level,
+    "% conditional percentile bootstrap interval"
+  ),
+  Observed_distance = observed_distance_direct,
+  Bootstrap_mean = mean(boot_distance),
+  Bootstrap_median = stats::median(boot_distance),
+  Bootstrap_bias = mean(boot_distance) - observed_distance_direct,
+  Bootstrap_SE = stats::sd(boot_distance),
+  CI_low = distance_ci[1],
+  CI_high = distance_ci[2],
+  Minimum = min(boot_distance),
+  Maximum = max(boot_distance),
+  B = B,
+  Total_attempts = total_bootstrap_attempts,
+  Invalid_attempts = invalid_bootstrap_attempts,
+  Invalid_attempt_fraction = invalid_bootstrap_attempt_fraction,
+  Seed = bootstrap_seed
+)
+
+# ------------------------------------------------------------
+# 11. Summarise directional components
+# ------------------------------------------------------------
+
+variable_labels <- c(
+  distance = "Distance travelled",
+  crossing = "Line crossings",
+  top_entry = "Upper-zone entries",
+  top_time = "Upper-zone time"
+)
+
+component_summary_list <- lapply(
+  seq_along(behavioural_variables),
+  function(j) {
+
+    variable_i <- behavioural_variables[j]
+    boot_column_i <- paste0(
+      "Delta_",
+      variable_i
+    )
+
+    component_distribution_i <- bootstrap_results[
+      ,
+      boot_column_i
+    ]
+
+    component_ci_i <- stats::quantile(
+      component_distribution_i,
+      probs = ci_probabilities,
+      names = FALSE,
+      type = 7
+    )
+
+    tibble::tibble(
+      Variable = variable_i,
+      Behaviour = unname(
+        variable_labels[variable_i]
+      ),
+      Robust_variable = robust_variables[j],
+      Direction = "Stress minus Control",
+      Observed_component = as.numeric(
+        observed_displacement_vector[
+          robust_variables[j]
+        ]
+      ),
+      Bootstrap_mean = mean(
+        component_distribution_i
+      ),
+      Bootstrap_median = stats::median(
+        component_distribution_i
+      ),
+      Bootstrap_bias = (
+        mean(component_distribution_i) -
+          observed_displacement_vector[
+            robust_variables[j]
+          ]
+      ),
+      Bootstrap_SE = stats::sd(
+        component_distribution_i
+      ),
+      CI_low = component_ci_i[1],
+      CI_high = component_ci_i[2],
+      Proportion_below_zero = mean(
+        component_distribution_i < 0
+      ),
+      Proportion_above_zero = mean(
+        component_distribution_i > 0
+      ),
+      B = B
+    )
+  }
+)
+
+centroid_bootstrap_components <- dplyr::bind_rows(
+  component_summary_list
+)
+
+# ------------------------------------------------------------
+# 12. Internal bootstrap checks
+# ------------------------------------------------------------
+
+if (
+  centroid_bootstrap_summary$CI_low >
+  centroid_bootstrap_summary$Observed_distance ||
+  centroid_bootstrap_summary$CI_high <
+  centroid_bootstrap_summary$Observed_distance
+) {
+  warning(
+    "The percentile interval does not contain the observed estimate. ",
+    "This is possible for a biased or asymmetric bootstrap ",
+    "distribution and should be reported rather than silently altered."
+  )
+}
+
+if (
+  any(
+    centroid_bootstrap_components$CI_low >
+      centroid_bootstrap_components$CI_high
+  )
+) {
+  stop(
+    "At least one component confidence interval is invalid."
+  )
+}
+
+if (
+  any(
+    centroid_bootstrap_components$
+      Proportion_below_zero +
+      centroid_bootstrap_components$
+        Proportion_above_zero >
+      1 + 1e-12
+  )
+) {
+  stop(
+    "The directional bootstrap proportions are invalid."
+  )
+}
+
+# ------------------------------------------------------------
+# 13. Save definitive corrected outputs
+# ------------------------------------------------------------
+
+bootstrap_distribution <- tibble::as_tibble(
+  bootstrap_results
+) %>%
+  dplyr::mutate(
+    Replicate = dplyr::row_number(),
+    .before = 1
+  )
+
+bootstrap_object <- list(
+  Objective = "Objective 2",
+  Comparison_design = "Independent Control and Stress populations",
+  Comparison = "Stress minus Control",
+  Input_raw_population_file = raw_population_file,
+  Input_corrected_population_file = corrected_population_file,
+  Input_observed_displacement_file = observed_displacement_file,
+  Coordinate_system = "Control-referenced robust behavioural space",
+  Normalisation_formula = paste0(
+    "(x - median_control_Author) / ",
+    "(1.4826 * MAD_raw_control_Author)"
+  ),
+  Bootstrap_scheme = paste0(
+    "Independent resampling within Author x Treatment strata; ",
+    "the Control reference is re-estimated separately within each ",
+    "Author in every replicate; attempts with a zero or non-finite ",
+    "Author-specific Control MAD are recorded and redrawn"
+  ),
+  Degenerate_resample_policy = paste0(
+    "Conditional redraw without scale regularisation; every invalid ",
+    "attempt is counted and excluded before the next complete ",
+    "Author x Treatment-stratified attempt"
+  ),
+  Interval_method = paste0(
+    100 * confidence_level,
+    "% conditional percentile bootstrap interval"
+  ),
+  Behavioural_variables = behavioural_variables,
+  Robust_variables = robust_variables,
+  Authors = expected_authors,
+  Group_counts = raw_group_counts,
+  Author_treatment_counts = raw_cohort_group_counts,
+  Full_sample_author_workflow_reproduced = TRUE,
+  Observed_distance = observed_distance_direct,
+  Observed_displacement_vector = observed_displacement_vector,
+  Bootstrap_summary = centroid_bootstrap_summary,
+  Component_summary = centroid_bootstrap_components,
+  Bootstrap_distribution = bootstrap_distribution,
+  B = B,
+  Total_bootstrap_attempts = total_bootstrap_attempts,
+  Invalid_bootstrap_attempts = invalid_bootstrap_attempts,
+  Invalid_bootstrap_attempt_fraction =
+    invalid_bootstrap_attempt_fraction,
+  Seed = bootstrap_seed,
+  Confidence_level = confidence_level
+)
+
+saveRDS(
+  bootstrap_object,
+  bootstrap_object_output
+)
+
+saveRDS(
+  boot_distance,
+  bootstrap_distance_output
+)
+
+utils::write.csv(
+  centroid_bootstrap_summary,
+  bootstrap_summary_output,
+  row.names = FALSE,
+  na = ""
+)
+
+utils::write.csv(
+  centroid_bootstrap_components,
+  bootstrap_components_output,
+  row.names = FALSE,
+  na = ""
+)
+
+capture.output(
+  utils::sessionInfo(),
+  file = session_info_output
+)
+
+# ------------------------------------------------------------
+# 14. Confirm output creation
+# ------------------------------------------------------------
+
+expected_output_files <- c(
+  bootstrap_object_output,
+  bootstrap_distance_output,
+  bootstrap_summary_output,
+  bootstrap_components_output,
+  session_info_output
+)
+
+missing_output_files <- expected_output_files[
+  !file.exists(expected_output_files)
+]
+
+if (length(missing_output_files) > 0L) {
+  stop(
+    "The following expected output files were not created:\n",
+    paste(missing_output_files, collapse = "\n")
+  )
+}
+
+# ------------------------------------------------------------
+# 15. Identify obsolete output from the former workflow
+# ------------------------------------------------------------
+
+legacy_files <- c(
+  file.path(
+    objects_dir,
+    "bootstrap_centroid_distance_4d.rds"
+  ),
+  file.path(
+    project_root,
+    "03_Results",
+    "Statistics",
+    "Centroid_Displacement_Bootstrap.csv"
+  )
+)
+
+existing_legacy_files <- legacy_files[
+  file.exists(legacy_files)
+]
+
+if (length(existing_legacy_files) > 0L) {
+  warning(
+    "Legacy bootstrap outputs from the former mean/SD workflow ",
+    "were detected. They were not used or overwritten:\n",
+    paste(existing_legacy_files, collapse = "\n")
+  )
+}
+
+# ------------------------------------------------------------
+# 16. Final console audit
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("OBJECTIVE 2 - BOOTSTRAP OF 4D CENTROID DISPLACEMENT\n")
+cat("============================================================\n")
+
+cat(
+  "\nIndependent populations:\n"
+)
+
+print(
+  raw_group_counts,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nPopulation sizes preserved within every Author x Treatment stratum:\n"
+)
+
+print(
+  raw_cohort_group_counts,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nObserved displacement reproduced from Script 012:\n"
+)
+
+cat(
+  "Euclidean distance in 4D = ",
+  format(
+    observed_distance_direct,
+    digits = 10
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nBootstrap design:\n",
+  "Valid replicates (B) = ",
+  B,
+  "\nTotal resampling attempts = ",
+  total_bootstrap_attempts,
+  "\nRejected attempts with zero/non-finite Author-specific ",
+  "Control MAD = ",
+  invalid_bootstrap_attempts,
+  "\nRejected-attempt fraction = ",
+  format(
+    invalid_bootstrap_attempt_fraction,
+    digits = 6
+  ),
+  "\nSeed = ",
+  bootstrap_seed,
+  "\nIndependent resampling within Author x Treatment strata.\n",
+  "Control-reference median and MAD re-estimated separately for ",
+  "each Author in every replicate.\n",
+  "The same replicate-specific Author reference is applied to that ",
+  "Author's Control and Stress fish.\n",
+  "Invalid attempts are recorded and completely redrawn; no zero MAD ",
+  "is regularised or replaced by an arbitrary value.\n",
+  sep = ""
+)
+
+cat(
+  "\nBootstrap summary for the total 4D displacement:\n"
+)
+
+print(
+  centroid_bootstrap_summary,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nBootstrap summary for the directional components:\n"
+)
+
+print(
+  centroid_bootstrap_components,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nInterpretive constraint: the percentile bootstrap interval ",
+  "is conditional on positive Author-specific resampled Control MADs ",
+  "and quantifies sampling uncertainty around the non-negative distance. ",
+  "It must not be treated as a null-hypothesis test merely because ",
+  "its lower bound is greater than zero.\n",
+  sep = ""
+)
+
+cat(
+  "\nDefinitive corrected outputs saved as:\n",
+  normalizePath(
+    bootstrap_object_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    bootstrap_distance_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    bootstrap_summary_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    bootstrap_components_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    session_info_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  sep = ""
+)
+
+cat("\n============================================================\n")
