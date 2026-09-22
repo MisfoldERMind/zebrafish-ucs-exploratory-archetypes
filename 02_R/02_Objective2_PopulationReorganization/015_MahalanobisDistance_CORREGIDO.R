@@ -40,14 +40,7 @@
 # 1. Project directory
 # ------------------------------------------------------------
 
-project_root <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+project_root <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(project_root)) {
   stop(
@@ -1004,3 +997,967 @@ observed_rank_statistics <- calculate_rank_biserial(
   reference_distances = control_distance_loo,
   comparison_distances = stress_distance
 )
+
+observed_U_control <- unname(
+  observed_rank_statistics[
+    "U_reference"
+  ]
+)
+
+observed_rank_biserial <- unname(
+  observed_rank_statistics[
+    "Rank_biserial_comparison_minus_reference"
+  ]
+)
+
+wilcoxon_secondary <- stats::wilcox.test(
+  x = control_distance_loo,
+  y = stress_distance,
+  alternative = "two.sided",
+  exact = FALSE,
+  correct = FALSE,
+  conf.int = FALSE
+)
+
+wilcoxon_secondary_table <- tibble::tibble(
+  Comparison = "Stress versus Control",
+  Outcome = "Mahalanobis distance to normative control atlas",
+  Control_distance_method = "Leave-one-out control atlas",
+  Stress_distance_method = "Complete control atlas",
+  Test = "Wilcoxon rank-sum test",
+  Role = paste0(
+    "Secondary descriptive test; primary inference uses ",
+    "reference-reconstructing label permutations"
+  ),
+  W_or_U_for_Control = as.numeric(
+    wilcoxon_secondary$statistic
+  ),
+  Two_sided_p = wilcoxon_secondary$p.value,
+  Rank_biserial_Stress_minus_Control =
+    observed_rank_biserial
+)
+
+if (
+  !isTRUE(
+    all.equal(
+      as.numeric(
+        wilcoxon_secondary$statistic
+      ),
+      observed_U_control,
+      tolerance = 1e-12
+    )
+  )
+) {
+  stop(
+    "The manually reconstructed Mann-Whitney statistic does not ",
+    "match wilcox.test()."
+  )
+}
+
+# ------------------------------------------------------------
+# 11. Primary reference-reconstructing permutation test
+# ------------------------------------------------------------
+
+set.seed(
+  permutation_seed
+)
+
+n_total <- nrow(
+  behaviour_matrix
+)
+
+n_control <- nrow(
+  control_matrix
+)
+
+all_fish_indices <- seq_len(
+  n_total
+)
+
+permutation_rank_biserial <- numeric(
+  n_permutations
+)
+
+permutation_median_difference <- numeric(
+  n_permutations
+)
+
+permutation_mean_difference <- numeric(
+  n_permutations
+)
+
+permutation_start_time <- proc.time()[["elapsed"]]
+
+cat(
+  "\nStarting ",
+  n_permutations,
+  " global label permutations on the fixed robustly normalised ",
+  "coordinates.\n",
+  sep = ""
+)
+
+flush.console()
+
+for (b in seq_len(n_permutations)) {
+
+  # This is the original global label-permutation scheme. No
+  # restriction by Author and no re-normalisation are introduced.
+
+  permuted_control_indices <- sample.int(
+    n = n_total,
+    size = n_control,
+    replace = FALSE
+  )
+
+  is_permuted_control <- logical(
+    n_total
+  )
+
+  is_permuted_control[
+    permuted_control_indices
+  ] <- TRUE
+
+  permuted_stress_indices <- all_fish_indices[
+    !is_permuted_control
+  ]
+
+  permuted_reference <- calculate_reference_distances(
+    reference_matrix = behaviour_matrix[
+      permuted_control_indices,
+      ,
+      drop = FALSE
+    ],
+    comparison_matrix = behaviour_matrix[
+      permuted_stress_indices,
+      ,
+      drop = FALSE
+    ]
+  )
+
+  permuted_control_distance <- permuted_reference[[
+    "Reference_distance_leave_one_out"
+  ]]
+
+  permuted_stress_distance <- permuted_reference[[
+    "Comparison_distance"
+  ]]
+
+  permuted_rank_statistics <- calculate_rank_biserial(
+    reference_distances = permuted_control_distance,
+    comparison_distances = permuted_stress_distance
+  )
+
+  permutation_rank_biserial[b] <- unname(
+    permuted_rank_statistics[
+      "Rank_biserial_comparison_minus_reference"
+    ]
+  )
+
+  permutation_median_difference[b] <- (
+    stats::median(
+      permuted_stress_distance
+    ) -
+      stats::median(
+        permuted_control_distance
+      )
+  )
+
+  permutation_mean_difference[b] <- (
+    mean(
+      permuted_stress_distance
+    ) -
+      mean(
+        permuted_control_distance
+      )
+  )
+
+  if (
+    b %% permutation_progress_interval == 0L ||
+    b == n_permutations
+  ) {
+
+    elapsed_seconds <- (
+      proc.time()[["elapsed"]] -
+        permutation_start_time
+    )
+
+    estimated_total_seconds <- (
+      elapsed_seconds /
+        b *
+        n_permutations
+    )
+
+    remaining_seconds <- max(
+      estimated_total_seconds -
+        elapsed_seconds,
+      0
+    )
+
+    cat(
+      sprintf(
+        paste0(
+          "Permutation progress: %d/%d (%.1f%%) | ",
+          "elapsed %.1f min | estimated remaining %.1f min\n"
+        ),
+        b,
+        n_permutations,
+        100 * b / n_permutations,
+        elapsed_seconds / 60,
+        remaining_seconds / 60
+      )
+    )
+
+    flush.console()
+  }
+}
+
+if (
+  any(
+    !is.finite(
+      permutation_rank_biserial
+    )
+  ) ||
+  any(
+    !is.finite(
+      permutation_median_difference
+    )
+  ) ||
+  any(
+    !is.finite(
+      permutation_mean_difference
+    )
+  )
+) {
+  stop(
+    "The permutation procedure produced non-finite statistics."
+  )
+}
+
+observed_median_difference <- (
+  stats::median(
+    stress_distance
+  ) -
+    stats::median(
+      control_distance_loo
+    )
+)
+
+observed_mean_difference <- (
+  mean(
+    stress_distance
+  ) -
+    mean(
+      control_distance_loo
+    )
+)
+
+permutation_p_two_sided <- (
+  1 +
+    sum(
+      abs(
+        permutation_rank_biserial
+      ) >=
+        abs(
+          observed_rank_biserial
+        )
+    )
+) /
+  (
+    n_permutations +
+      1
+  )
+
+permutation_p_stress_greater <- (
+  1 +
+    sum(
+      permutation_rank_biserial >=
+        observed_rank_biserial
+    )
+) /
+  (
+    n_permutations +
+      1
+  )
+
+permutation_test_table <- tibble::tibble(
+  Comparison = "Stress versus Control",
+  Null_procedure = paste0(
+    "Treatment labels permuted globally across the fixed robustly ",
+    "normalised coordinates; pooled Control atlas, leave-one-out ",
+    "Control distances, and Stress distances reconstructed in every ",
+    "permutation"
+  ),
+  Primary_statistic =
+    "Rank-biserial correlation, Stress minus Control",
+  Observed_rank_biserial =
+    observed_rank_biserial,
+  Observed_median_difference_Stress_minus_Control =
+    observed_median_difference,
+  Observed_mean_difference_Stress_minus_Control =
+    observed_mean_difference,
+  Two_sided_permutation_p =
+    permutation_p_two_sided,
+  One_sided_p_Stress_greater =
+    permutation_p_stress_greater,
+  Permutations = n_permutations,
+  Seed = permutation_seed
+)
+
+# ------------------------------------------------------------
+# 12. Normative atlas diagnostics
+# ------------------------------------------------------------
+
+reference_center <- observed_reference[[
+  "Reference_center"
+]]
+
+reference_covariance <- observed_reference[[
+  "Reference_covariance"
+]]
+
+reference_correlation <- stats::cov2cor(
+  reference_covariance
+)
+
+covariance_eigenvalues <- observed_reference[[
+  "Covariance_eigenvalues"
+]]
+
+covariance_condition_number <- kappa(
+  reference_covariance,
+  exact = TRUE
+)
+
+covariance_rank <- qr(
+  reference_covariance
+)$rank
+
+reference_center_table <- tibble::tibble(
+  Variable = behavioural_variables,
+  Behaviour = unname(
+    variable_labels[
+      behavioural_variables
+    ]
+  ),
+  Robust_variable = robust_variables,
+  Control_atlas_mean = as.numeric(
+    reference_center[
+      robust_variables
+    ]
+  )
+)
+
+covariance_table <- as.data.frame(
+  reference_covariance,
+  check.names = FALSE
+) %>%
+  tibble::rownames_to_column(
+    var = "Variable"
+  ) %>%
+  tibble::as_tibble()
+
+correlation_table <- as.data.frame(
+  reference_correlation,
+  check.names = FALSE
+) %>%
+  tibble::rownames_to_column(
+    var = "Variable"
+  ) %>%
+  tibble::as_tibble()
+
+covariance_diagnostics <- tibble::tibble(
+  Dimensions = length(
+    robust_variables
+  ),
+  Control_n = nrow(
+    control_matrix
+  ),
+  Covariance_rank = covariance_rank,
+  Minimum_eigenvalue = min(
+    covariance_eigenvalues
+  ),
+  Maximum_eigenvalue = max(
+    covariance_eigenvalues
+  ),
+  Condition_number = covariance_condition_number,
+  Determinant = determinant(
+    reference_covariance,
+    logarithm = FALSE
+  )$modulus %>%
+    as.numeric(),
+  Positive_definite = all(
+    covariance_eigenvalues > 0
+  ),
+  Maximum_LOO_formula_error =
+    loo_maximum_absolute_difference
+)
+
+if (
+  covariance_rank !=
+    length(robust_variables)
+) {
+  stop(
+    "The control covariance matrix is not full rank."
+  )
+}
+
+# ------------------------------------------------------------
+# 13. Consistency with the 4D centroid-displacement analysis
+# ------------------------------------------------------------
+
+required_centroid_field <- "Euclidean_centroid_displacement_4D"
+
+if (
+  !required_centroid_field %in%
+    names(
+      centroid_displacement_object
+    )
+) {
+  stop(
+    "The Script 012 object does not contain ",
+    required_centroid_field,
+    "."
+  )
+}
+
+stored_centroid_displacement <- as.numeric(
+  centroid_displacement_object[[required_centroid_field]]
+)
+
+if (
+  length(stored_centroid_displacement) != 1L ||
+  !is.finite(stored_centroid_displacement)
+) {
+  stop(
+    "The centroid displacement stored by Script 012 is invalid."
+  )
+}
+
+recalculated_centroid_displacement <- sqrt(
+  sum(
+    (
+      colMeans(stress_matrix) -
+        colMeans(control_matrix)
+    )^2
+  )
+)
+
+if (
+  !isTRUE(
+    all.equal(
+      recalculated_centroid_displacement,
+      stored_centroid_displacement,
+      tolerance = 1e-12
+    )
+  )
+) {
+  stop(
+    "The current robustly normalised population does not reproduce ",
+    "the 4D centroid displacement stored by Script 012."
+  )
+}
+
+# ------------------------------------------------------------
+# 14. Figure
+# ------------------------------------------------------------
+
+figure_data <- individual_distances %>%
+  dplyr::select(
+    Treatment,
+    Mahalanobis_distance
+  )
+
+mahalanobis_plot <- ggplot2::ggplot(
+  figure_data,
+  ggplot2::aes(
+    x = Treatment,
+    y = Mahalanobis_distance
+  )
+) +
+  ggplot2::geom_violin(
+    width = 0.78,
+    trim = FALSE,
+    fill = "grey90",
+    colour = "grey35",
+    linewidth = 0.55
+  ) +
+  ggplot2::geom_boxplot(
+    width = 0.22,
+    outlier.shape = NA,
+    fill = "white",
+    colour = "black",
+    linewidth = 0.55
+  ) +
+  ggplot2::geom_point(
+    position = ggplot2::position_jitter(
+      width = 0.09,
+      height = 0,
+      seed = 2026L
+    ),
+    size = 1.65,
+    alpha = 0.65,
+    colour = "black"
+  ) +
+  ggplot2::labs(
+    x = NULL,
+    y = "Mahalanobis distance to normative control atlas"
+  ) +
+  ggplot2::theme_classic(
+    base_size = 12,
+    base_family = "Arial"
+  ) +
+  ggplot2::theme(
+    plot.background = ggplot2::element_rect(
+      fill = "white",
+      colour = NA
+    ),
+    panel.background = ggplot2::element_rect(
+      fill = "white",
+      colour = NA
+    ),
+    axis.text = ggplot2::element_text(
+      colour = "black"
+    ),
+    axis.title = ggplot2::element_text(
+      colour = "black"
+    )
+  )
+
+print(
+  mahalanobis_plot
+)
+
+# ------------------------------------------------------------
+# 15. Save definitive corrected outputs
+# ------------------------------------------------------------
+
+permutation_distribution <- tibble::tibble(
+  Replicate = seq_len(
+    n_permutations
+  ),
+  Rank_biserial_Stress_minus_Control =
+    permutation_rank_biserial,
+  Median_difference_Stress_minus_Control =
+    permutation_median_difference,
+  Mean_difference_Stress_minus_Control =
+    permutation_mean_difference
+)
+
+analysis_summary <- tibble::tibble(
+  Objective = "Objective 2",
+  Comparison = "Stress versus Control",
+  Design = "Two independent populations",
+  Space = "Four-dimensional control-referenced robust behavioural space",
+  Distance = "Mahalanobis distance",
+  Control_distance_method = "Leave-one-out control atlas",
+  Stress_distance_method = "Complete control atlas",
+  Control_n = nrow(
+    control_matrix
+  ),
+  Stress_n = nrow(
+    stress_matrix
+  ),
+  Observed_centroid_displacement_4D =
+    stored_centroid_displacement,
+  Observed_rank_biserial_Stress_minus_Control =
+    observed_rank_biserial,
+  Primary_two_sided_permutation_p =
+    permutation_p_two_sided,
+  Secondary_Wilcoxon_p =
+    wilcoxon_secondary$p.value,
+  Permutations = n_permutations
+)
+
+results_object <- list(
+  Objective = "Objective 2",
+  Comparison_design = "Independent Control and Stress populations",
+  Input_population_file = population_file,
+  Input_centroid_displacement_file =
+    centroid_displacement_file,
+  Coordinate_system =
+    "Control-referenced robust behavioural space",
+  Behavioural_variables =
+    behavioural_variables,
+  Robust_variables =
+    robust_variables,
+  Distance_definition =
+    "Square root of classical Mahalanobis squared distance",
+  Control_distance_method =
+    "Leave-one-out control atlas",
+  Stress_distance_method =
+    "Complete control atlas",
+  Reference_center =
+    reference_center,
+  Reference_covariance =
+    reference_covariance,
+  Reference_correlation =
+    reference_correlation,
+  Covariance_eigenvalues =
+    covariance_eigenvalues,
+  Covariance_diagnostics =
+    covariance_diagnostics,
+  Author_reference_audit =
+    control_reference_audit,
+  Individual_distances =
+    individual_distances,
+  Descriptive_summary =
+    summary_table,
+  Primary_permutation_test =
+    permutation_test_table,
+  Secondary_Wilcoxon_test =
+    wilcoxon_secondary_table,
+  Permutation_distribution =
+    permutation_distribution,
+  Analysis_summary =
+    analysis_summary
+)
+
+saveRDS(
+  individual_distances,
+  individual_output
+)
+
+saveRDS(
+  results_object,
+  results_output
+)
+
+saveRDS(
+  permutation_distribution,
+  permutation_output
+)
+
+workbook_sheets <- list(
+  Analysis_summary = analysis_summary,
+  Descriptive_statistics = summary_table,
+  Primary_permutation_test = permutation_test_table,
+  Secondary_Wilcoxon = wilcoxon_secondary_table,
+  Control_atlas_centre = reference_center_table,
+  Control_covariance = covariance_table,
+  Control_correlation = correlation_table,
+  Covariance_diagnostics = covariance_diagnostics,
+  Author_reference_audit = control_reference_audit,
+  Individual_distances = individual_distances
+)
+
+workbook <- openxlsx::createWorkbook()
+
+header_style <- openxlsx::createStyle(
+  textDecoration = "bold",
+  halign = "center",
+  valign = "center",
+  wrapText = TRUE
+)
+
+for (sheet_i in names(workbook_sheets)) {
+
+  sheet_data_i <- workbook_sheets[[sheet_i]]
+
+  if (!is.data.frame(sheet_data_i)) {
+    stop(
+      "Workbook sheet ",
+      sheet_i,
+      " is not a data frame."
+    )
+  }
+
+  openxlsx::addWorksheet(
+    workbook,
+    sheet_i
+  )
+
+  openxlsx::writeData(
+    workbook,
+    sheet = sheet_i,
+    x = sheet_data_i
+  )
+
+  n_columns_i <- ncol(
+    sheet_data_i
+  )
+
+  if (n_columns_i > 0L) {
+
+    openxlsx::addStyle(
+      workbook,
+      sheet = sheet_i,
+      style = header_style,
+      rows = 1,
+      cols = seq_len(
+        n_columns_i
+      ),
+      gridExpand = TRUE,
+      stack = TRUE
+    )
+
+    openxlsx::setColWidths(
+      workbook,
+      sheet = sheet_i,
+      cols = seq_len(
+        n_columns_i
+      ),
+      widths = "auto"
+    )
+  }
+
+  openxlsx::freezePane(
+    workbook,
+    sheet = sheet_i,
+    firstRow = TRUE
+  )
+}
+
+openxlsx::saveWorkbook(
+  workbook,
+  workbook_output,
+  overwrite = TRUE
+)
+
+ggplot2::ggsave(
+  filename = figure_pdf_output,
+  plot = mahalanobis_plot,
+  width = 5.2,
+  height = 6.2,
+  units = "in",
+  device = grDevices::cairo_pdf,
+  bg = "white"
+)
+
+ggplot2::ggsave(
+  filename = figure_tiff_output,
+  plot = mahalanobis_plot,
+  width = 5.2,
+  height = 6.2,
+  units = "in",
+  dpi = 600,
+  compression = "lzw",
+  bg = "white"
+)
+
+ggplot2::ggsave(
+  filename = figure_png_output,
+  plot = mahalanobis_plot,
+  width = 5.2,
+  height = 6.2,
+  units = "in",
+  dpi = 300,
+  bg = "white"
+)
+
+capture.output(
+  utils::sessionInfo(),
+  file = session_info_output
+)
+
+# ------------------------------------------------------------
+# 16. Confirm output creation
+# ------------------------------------------------------------
+
+expected_output_files <- c(
+  individual_output,
+  results_output,
+  permutation_output,
+  workbook_output,
+  figure_pdf_output,
+  figure_tiff_output,
+  figure_png_output,
+  session_info_output
+)
+
+missing_output_files <- expected_output_files[
+  !file.exists(expected_output_files)
+]
+
+if (length(missing_output_files) > 0L) {
+  stop(
+    "The following expected output files were not created:\n",
+    paste(missing_output_files, collapse = "\n")
+  )
+}
+
+# ------------------------------------------------------------
+# 17. Identify obsolete outputs from the former workflow
+# ------------------------------------------------------------
+
+legacy_files <- c(
+  file.path(
+    processed_dir,
+    "population_control_stress_z.rds"
+  ),
+  file.path(
+    figures_dir,
+    "Figure11_Mahalanobis.pdf"
+  ),
+  file.path(
+    figures_dir,
+    "Figure11_Mahalanobis.tiff"
+  ),
+  file.path(
+    tables_dir,
+    "Table4_Mahalanobis.xlsx"
+  )
+)
+
+existing_legacy_files <- legacy_files[
+  file.exists(legacy_files)
+]
+
+if (length(existing_legacy_files) > 0L) {
+  warning(
+    "Legacy Mahalanobis outputs from the former mean/SD workflow ",
+    "were detected. They were not used or overwritten:\n",
+    paste(existing_legacy_files, collapse = "\n")
+  )
+}
+
+# ------------------------------------------------------------
+# 18. Final console audit
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("OBJECTIVE 2 - MAHALANOBIS DISTANCE TO NORMATIVE ATLAS\n")
+cat("============================================================\n")
+
+cat(
+  "\nIndependent populations:\n"
+)
+
+print(
+  group_counts,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nAuthor-specific control-reference audit ",
+  "(expected median = 0 and scaled MAD = 1):\n",
+  sep = ""
+)
+
+print(
+  control_reference_audit,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nControl normative-atlas centre:\n"
+)
+
+print(
+  reference_center_table,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nCovariance diagnostics:\n"
+)
+
+print(
+  covariance_diagnostics,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nDescriptive Mahalanobis distances:\n"
+)
+
+print(
+  summary_table,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nPrimary reference-reconstructing permutation test:\n"
+)
+
+print(
+  permutation_test_table,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nSecondary Wilcoxon rank-sum result:\n"
+)
+
+print(
+  wilcoxon_secondary_table,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nMethodological note: the Author-specific robust normalisation ",
+  "was completed previously in Script 011 and remained fixed. ",
+  "Control distances were calculated by leave-one-out estimation, ",
+  "whereas Stress distances were calculated against the complete ",
+  "pooled Control atlas. The primary global label-permutation test ",
+  "reconstructed the pooled atlas and both distance sets after every ",
+  "permutation.\n",
+  sep = ""
+)
+
+cat(
+  "\nstats::mahalanobis() returns squared distances; the reported ",
+  "and plotted outcome is their square root.\n",
+  sep = ""
+)
+
+cat(
+  "\nDefinitive corrected outputs saved as:\n",
+  normalizePath(
+    individual_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    results_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    permutation_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    workbook_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    figure_pdf_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    figure_tiff_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    figure_png_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    session_info_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  sep = ""
+)
+
+cat("\n============================================================\n")
