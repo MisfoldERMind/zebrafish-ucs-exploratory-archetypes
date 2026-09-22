@@ -57,14 +57,7 @@ cat(
 # 1. Project directory
 # ------------------------------------------------------------
 
-project_root <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+project_root <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(project_root)) {
   stop(
@@ -1005,3 +998,945 @@ for (
     robust_variables[variable_1_index]
 
   variable_2 <-
+    robust_variables[variable_2_index]
+
+  test_result <- suppressWarnings(
+    stats::cor.test(
+      stress_matrix[
+        ,
+        variable_1_index
+      ],
+      stress_matrix[
+        ,
+        variable_2_index
+      ],
+      method = "spearman",
+      exact = FALSE
+    )
+  )
+
+  pairwise_results_list[[
+    pair_i
+  ]] <- tibble::tibble(
+    Variable_1 = variable_1,
+    Variable_1_label =
+      unname(
+        variable_labels[
+          variable_1
+        ]
+      ),
+    Variable_2 = variable_2,
+    Variable_2_label =
+      unname(
+        variable_labels[
+          variable_2
+        ]
+      ),
+    n = expected_stress_n,
+    Spearman_rho =
+      as.numeric(
+        unname(
+          test_result$estimate
+        )
+      ),
+    P_raw =
+      as.numeric(
+        test_result$p.value
+      )
+  )
+}
+
+pairwise_results <- dplyr::bind_rows(
+  pairwise_results_list
+)
+
+pairwise_results <- pairwise_results %>%
+  dplyr::mutate(
+    P_Holm = stats::p.adjust(
+      P_raw,
+      method = "holm"
+    ),
+    Significant_Holm =
+      P_Holm <
+      significance_level
+  )
+
+p_matrix_raw <- matrix(
+  0,
+  nrow = length(robust_variables),
+  ncol = length(robust_variables),
+  dimnames = list(
+    robust_variables,
+    robust_variables
+  )
+)
+
+p_matrix_holm <- matrix(
+  0,
+  nrow = length(robust_variables),
+  ncol = length(robust_variables),
+  dimnames = list(
+    robust_variables,
+    robust_variables
+  )
+)
+
+for (
+  pair_i in seq_len(
+    nrow(pairwise_results)
+  )
+) {
+  variable_1_index <- match(
+    pairwise_results$Variable_1[
+      pair_i
+    ],
+    robust_variables
+  )
+
+  variable_2_index <- match(
+    pairwise_results$Variable_2[
+      pair_i
+    ],
+    robust_variables
+  )
+
+  p_matrix_raw[
+    variable_1_index,
+    variable_2_index
+  ] <- pairwise_results$P_raw[
+    pair_i
+  ]
+
+  p_matrix_raw[
+    variable_2_index,
+    variable_1_index
+  ] <- pairwise_results$P_raw[
+    pair_i
+  ]
+
+  p_matrix_holm[
+    variable_1_index,
+    variable_2_index
+  ] <- pairwise_results$P_Holm[
+    pair_i
+  ]
+
+  p_matrix_holm[
+    variable_2_index,
+    variable_1_index
+  ] <- pairwise_results$P_Holm[
+    pair_i
+  ]
+}
+
+
+# ------------------------------------------------------------
+# 12. Validate correlation and p-value results
+# ------------------------------------------------------------
+
+validate_symmetric_matrix <- function(
+    matrix_object,
+    expected_diagonal,
+    lower_limit,
+    upper_limit,
+    object_name
+) {
+  matrix_object <- as.matrix(
+    matrix_object
+  )
+
+  if (
+    !identical(
+      dim(matrix_object),
+      c(
+        4L,
+        4L
+      )
+    )
+  ) {
+    stop(
+      object_name,
+      " does not have dimensions 4 x 4."
+    )
+  }
+
+  if (
+    !identical(
+      rownames(matrix_object),
+      robust_variables
+    ) ||
+    !identical(
+      colnames(matrix_object),
+      robust_variables
+    )
+  ) {
+    stop(
+      object_name,
+      " has incorrect variable names or order."
+    )
+  }
+
+  if (
+    any(
+      !is.finite(
+        matrix_object
+      )
+    )
+  ) {
+    stop(
+      object_name,
+      " contains non-finite values."
+    )
+  }
+
+  if (
+    max(
+      abs(
+        matrix_object -
+          t(matrix_object)
+      )
+    ) >
+      numeric_tolerance
+  ) {
+    stop(
+      object_name,
+      " is not symmetric within tolerance."
+    )
+  }
+
+  if (
+    max(
+      abs(
+        diag(matrix_object) -
+          expected_diagonal
+      )
+    ) >
+      numeric_tolerance
+  ) {
+    stop(
+      object_name,
+      " has an incorrect diagonal."
+    )
+  }
+
+  if (
+    any(
+      matrix_object <
+        lower_limit -
+        numeric_tolerance
+    ) ||
+    any(
+      matrix_object >
+        upper_limit +
+        numeric_tolerance
+    )
+  ) {
+    stop(
+      object_name,
+      " contains values outside the permitted range."
+    )
+  }
+
+  invisible(
+    TRUE
+  )
+}
+
+validate_symmetric_matrix(
+  cor_matrix_stress,
+  expected_diagonal = 1,
+  lower_limit = -1,
+  upper_limit = 1,
+  object_name =
+    "The Stress Spearman correlation matrix"
+)
+
+validate_symmetric_matrix(
+  p_matrix_raw,
+  expected_diagonal = 0,
+  lower_limit = 0,
+  upper_limit = 1,
+  object_name =
+    "The raw p-value matrix"
+)
+
+validate_symmetric_matrix(
+  p_matrix_holm,
+  expected_diagonal = 0,
+  lower_limit = 0,
+  upper_limit = 1,
+  object_name =
+    "The Holm-adjusted p-value matrix"
+)
+
+if (
+  nrow(pairwise_results) != 6L ||
+  any(
+    pairwise_results$n !=
+      expected_stress_n
+  ) ||
+  any(
+    !is.finite(
+      pairwise_results$Spearman_rho
+    )
+  ) ||
+  any(
+    !is.finite(
+      pairwise_results$P_raw
+    )
+  ) ||
+  any(
+    !is.finite(
+      pairwise_results$P_Holm
+    )
+  )
+) {
+  stop(
+    "The pairwise correlation-results table is incomplete or invalid."
+  )
+}
+
+matrix_correlations_for_pairs <- vapply(
+  seq_len(
+    nrow(pairwise_results)
+  ),
+  function(pair_i) {
+    cor_matrix_stress[
+      pairwise_results$Variable_1[
+        pair_i
+      ],
+      pairwise_results$Variable_2[
+        pair_i
+      ]
+    ]
+  },
+  numeric(1)
+)
+
+maximum_rho_recalculation_difference <- max(
+  abs(
+    pairwise_results$Spearman_rho -
+      matrix_correlations_for_pairs
+  )
+)
+
+if (
+  maximum_rho_recalculation_difference >
+    numeric_tolerance
+) {
+  stop(
+    "The pairwise Spearman estimates do not reproduce the ",
+    "correlation matrix within tolerance."
+  )
+}
+
+
+# ------------------------------------------------------------
+# 13. Prepare export tables
+# ------------------------------------------------------------
+
+matrix_to_export_table <- function(
+    matrix_object
+) {
+  matrix_object <- as.matrix(
+    matrix_object
+  )
+
+  output <- data.frame(
+    Robust_variable =
+      rownames(matrix_object),
+    Variable =
+      unname(
+        variable_labels[
+          rownames(matrix_object)
+        ]
+      ),
+    as.data.frame(
+      matrix_object,
+      check.names = FALSE
+    ),
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+
+  names(output)[-(1:2)] <- unname(
+    variable_labels[
+      colnames(matrix_object)
+    ]
+  )
+
+  rownames(output) <- NULL
+
+  output
+}
+
+correlation_export <-
+  matrix_to_export_table(
+    cor_matrix_stress
+  )
+
+p_raw_export <-
+  matrix_to_export_table(
+    p_matrix_raw
+  )
+
+p_holm_export <-
+  matrix_to_export_table(
+    p_matrix_holm
+  )
+
+metadata_export <- data.frame(
+  Field = c(
+    "Objective",
+    "Analytical population",
+    "Sample size",
+    "Traceability",
+    "Authors/cohorts",
+    "Reference space",
+    "Normalisation",
+    "Correlation method",
+    "Pairwise tests",
+    "Multiplicity correction",
+    "Significance threshold",
+    "Interpretive status"
+  ),
+  Value = c(
+    "Objective 3",
+    "Stress only",
+    as.character(
+      expected_stress_n
+    ),
+    expected_traceability,
+    paste(
+      population_authors,
+      collapse = ", "
+    ),
+    as.character(
+      setup_object[["Reference_space"]]
+    ),
+    expected_normalisation,
+    "Spearman rank correlation",
+    "Two-sided; asymptotic p values (exact = FALSE)",
+    "Holm correction across six unique variable pairs",
+    as.character(
+      significance_level
+    ),
+    paste(
+      "Pre-clustering description; does not identify, define, or validate",
+      "resilient-like or susceptible-like phenotypes"
+    )
+  ),
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+
+# ------------------------------------------------------------
+# 14. Save tables and reusable analysis object
+# ------------------------------------------------------------
+
+openxlsx::write.xlsx(
+  x = list(
+    Spearman_rho =
+      correlation_export,
+    P_raw =
+      p_raw_export,
+    P_Holm =
+      p_holm_export,
+    Pairwise_results =
+      as.data.frame(
+        pairwise_results
+      ),
+    Author_recalculation_audit =
+      as.data.frame(
+        normalisation_recalculation_audit
+      ),
+    Metadata =
+      metadata_export
+  ),
+  file = xlsx_output,
+  overwrite = TRUE
+)
+
+utils::write.csv(
+  pairwise_results,
+  pairwise_csv_output,
+  row.names = FALSE,
+  na = ""
+)
+
+correlation_object <- list(
+  Objective = "Objective 3",
+  Scientific_question =
+    setup_object[["Scientific_question"]],
+  Operational_question =
+    setup_object[["Operational_question"]],
+  Analytical_population =
+    "Stress only",
+  Stress_n =
+    expected_stress_n,
+  Authors =
+    population_authors,
+  Traceability =
+    expected_traceability,
+  Reference_space =
+    setup_object[["Reference_space"]],
+  Normalisation =
+    setup_object[["Normalisation"]],
+  Normalisation_formula =
+    setup_object[["Normalisation_formula"]],
+  Behavioural_variables =
+    behavioural_variables,
+  Robust_variables =
+    robust_variables,
+  Variable_labels =
+    variable_labels,
+  Correlation_method =
+    "Spearman",
+  Exact_p_values =
+    FALSE,
+  Multiple_testing_method =
+    "Holm",
+  Significance_level =
+    significance_level,
+  Author_specific_normalisation_recalculation_audit =
+    normalisation_recalculation_audit,
+  Correlation_matrix =
+    cor_matrix_stress,
+  P_raw_matrix =
+    p_matrix_raw,
+  P_Holm_matrix =
+    p_matrix_holm,
+  Pairwise_results =
+    pairwise_results,
+  Unique_value_counts =
+    unique_value_counts,
+  Variable_standard_deviations =
+    variable_standard_deviations,
+  Maximum_rho_recalculation_difference =
+    maximum_rho_recalculation_difference,
+  Source_stress_file =
+    stress_input,
+  Source_setup_file =
+    setup_input
+)
+
+saveRDS(
+  correlation_object,
+  object_output
+)
+
+capture.output(
+  utils::sessionInfo(),
+  file = session_info_output
+)
+
+
+# ------------------------------------------------------------
+# 15. Create the correlation-matrix figure
+# ------------------------------------------------------------
+
+plot_correlation_matrix <-
+  cor_matrix_stress
+
+plot_p_matrix <-
+  p_matrix_holm
+
+plot_labels <- unname(
+  variable_labels[
+    robust_variables
+  ]
+)
+
+dimnames(
+  plot_correlation_matrix
+) <- list(
+  plot_labels,
+  plot_labels
+)
+
+dimnames(
+  plot_p_matrix
+) <- list(
+  plot_labels,
+  plot_labels
+)
+
+correlation_palette <- grDevices::colorRampPalette(
+  c(
+    "#2166AC",
+    "#F7F7F7",
+    "#B2182B"
+  )
+)(200)
+
+draw_correlation_figure <- function() {
+  corrplot::corrplot(
+    corr =
+      plot_correlation_matrix,
+    method =
+      "color",
+    type =
+      "upper",
+    order =
+      "hclust",
+    hclust.method =
+      "complete",
+    col =
+      correlation_palette,
+    col.lim =
+      c(
+        -1,
+        1
+      ),
+    diag =
+      FALSE,
+    addCoef.col =
+      "black",
+    number.cex =
+      0.95,
+    tl.col =
+      "black",
+    tl.srt =
+      45,
+    tl.cex =
+      1.0,
+    p.mat =
+      plot_p_matrix,
+    sig.level =
+      significance_level,
+    insig =
+      "blank",
+    cl.pos =
+      "r",
+    cl.cex =
+      0.9,
+    mar =
+      c(
+        0,
+        0,
+        0,
+        0
+      )
+  )
+}
+
+grDevices::pdf(
+  pdf_output,
+  width = 7,
+  height = 7,
+  useDingbats = FALSE
+)
+
+tryCatch(
+  draw_correlation_figure(),
+  finally =
+    grDevices::dev.off()
+)
+
+grDevices::tiff(
+  tiff_output,
+  width = 7,
+  height = 7,
+  units = "in",
+  res = 600,
+  compression = "lzw",
+  bg = "white"
+)
+
+tryCatch(
+  draw_correlation_figure(),
+  finally =
+    grDevices::dev.off()
+)
+
+
+# ------------------------------------------------------------
+# 16. Confirm output creation
+# ------------------------------------------------------------
+
+expected_output_files <- c(
+  pdf_output,
+  tiff_output,
+  xlsx_output,
+  pairwise_csv_output,
+  object_output,
+  session_info_output
+)
+
+missing_output_files <- expected_output_files[
+  !file.exists(
+    expected_output_files
+  )
+]
+
+if (
+  length(
+    missing_output_files
+  ) > 0L
+) {
+  stop(
+    "The following expected outputs were not created:\n",
+    paste(
+      missing_output_files,
+      collapse = "\n"
+    )
+  )
+}
+
+output_file_information <- file.info(
+  expected_output_files
+)
+
+if (
+  any(
+    is.na(
+      output_file_information$size
+    )
+  ) ||
+  any(
+    output_file_information$size <= 0
+  )
+) {
+  stop(
+    "At least one expected output file is empty or inaccessible."
+  )
+}
+
+
+# ------------------------------------------------------------
+# 17. Final console audit
+# ------------------------------------------------------------
+
+strongest_pair_index <- which.max(
+  abs(
+    pairwise_results$Spearman_rho
+  )
+)
+
+weakest_pair_index <- which.min(
+  abs(
+    pairwise_results$Spearman_rho
+  )
+)
+
+number_significant_holm <- sum(
+  pairwise_results$Significant_Holm
+)
+
+cat(
+  "\n============================================================\n"
+)
+
+cat(
+  "OBJECTIVE 3 - CORRECTED STRESS CORRELATION MATRIX\n"
+)
+
+cat(
+  "============================================================\n"
+)
+
+cat(
+  "\nAnalytical population: Stress only (n = ",
+  expected_stress_n,
+  ")\n",
+  sep = ""
+)
+
+cat(
+  "Traceability: ",
+  expected_traceability,
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Authors/cohorts retained: ",
+  paste(
+    population_authors,
+    collapse = ", "
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Analytical scale: Author-specific Control-referenced robust ",
+  "coordinates inherited unchanged from corrected Objectives 1 and 2.\n",
+  sep = ""
+)
+
+cat(
+  "Normalisation: ",
+  expected_normalisation,
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Correlation method: Spearman; Holm correction across six ",
+  "unique pairwise tests.\n",
+  sep = ""
+)
+
+cat(
+  "\nAuthor-specific robust-score recalculation audit:\n"
+)
+
+print(
+  normalisation_recalculation_audit,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nMaximum robust-score recalculation difference: ",
+  format(
+    max(
+      normalisation_recalculation_audit[[
+        "Maximum_absolute_recalculation_difference"
+      ]]
+    ),
+    scientific = TRUE
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Maximum difference between matrix and pairwise rho estimates: ",
+  format(
+    maximum_rho_recalculation_difference,
+    scientific = TRUE
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nSpearman correlation matrix:\n"
+)
+
+print(
+  round(
+    cor_matrix_stress,
+    3
+  )
+)
+
+cat(
+  "\nRaw p-value matrix:\n"
+)
+
+print(
+  format.pval(
+    p_matrix_raw,
+    digits = 4,
+    eps = 1e-16
+  )
+)
+
+cat(
+  "\nHolm-adjusted p-value matrix:\n"
+)
+
+print(
+  format.pval(
+    p_matrix_holm,
+    digits = 4,
+    eps = 1e-16
+  )
+)
+
+cat(
+  "\nUnique pairwise results:\n"
+)
+
+print(
+  pairwise_results,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nStrongest association: ",
+  pairwise_results$Variable_1_label[
+    strongest_pair_index
+  ],
+  " with ",
+  pairwise_results$Variable_2_label[
+    strongest_pair_index
+  ],
+  " (rho = ",
+  sprintf(
+    "%.3f",
+    pairwise_results$Spearman_rho[
+      strongest_pair_index
+    ]
+  ),
+  ").\n",
+  sep = ""
+)
+
+cat(
+  "Weakest association: ",
+  pairwise_results$Variable_1_label[
+    weakest_pair_index
+  ],
+  " with ",
+  pairwise_results$Variable_2_label[
+    weakest_pair_index
+  ],
+  " (rho = ",
+  sprintf(
+    "%.3f",
+    pairwise_results$Spearman_rho[
+      weakest_pair_index
+    ]
+  ),
+  ").\n",
+  sep = ""
+)
+
+cat(
+  "Holm-significant associations: ",
+  number_significant_holm,
+  " of 6.\n",
+  sep = ""
+)
+
+cat(
+  "\nInterpretive constraint: this figure describes the shared ",
+  "pre-clustering dependence structure within Stress and does not ",
+  "demonstrate discrete post-stress behavioural phenotypes.\n",
+  sep = ""
+)
+
+cat(
+  "\nDownstream constraint: PCA and Louvain must use the same four ",
+  "*_rz coordinates without additional scaling or Stress-specific ",
+  "normalisation.\n",
+  sep = ""
+)
+
+cat(
+  "\nOutputs created:\n"
+)
+
+for (
+  output_file in expected_output_files
+) {
+  cat(
+    normalizePath(
+      output_file,
+      winslash = "/",
+      mustWork = FALSE
+    ),
+    "\n",
+    sep = ""
+  )
+}
+
+cat(
+  "\n============================================================\n"
+)
