@@ -62,14 +62,7 @@ cat("\nRunning: ", script_version, "\n", sep = "")
 # 1. Project directory
 # ------------------------------------------------------------
 
-project_root <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+project_root <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(project_root)) {
   stop("Project directory not found:\n", project_root)
@@ -1005,3 +998,855 @@ if (
     !is.finite(
       score_data$Behavioural_Index
     )
+  )
+) {
+  stop(
+    "Non-finite values were produced for Behavioural_Index."
+  )
+}
+
+# Ensure that higher values indicate greater similarity to Control,
+# preserving the directional convention of the previous script.
+
+mean_control_index <- mean(
+  score_data$Behavioural_Index[
+    score_data$Treatment == "Control"
+  ]
+)
+
+mean_stress_index <- mean(
+  score_data$Behavioural_Index[
+    score_data$Treatment == "Stress"
+  ]
+)
+
+if (
+  mean_control_index <
+    mean_stress_index
+) {
+
+  score_data$Behavioural_Index <-
+    -score_data$Behavioural_Index
+
+  index_weights <-
+    -index_weights
+
+  mean_control_index <-
+    -mean_control_index
+
+  mean_stress_index <-
+    -mean_stress_index
+}
+
+index_summary <- score_data %>%
+  dplyr::group_by(
+    Treatment
+  ) %>%
+  dplyr::summarise(
+    n = dplyr::n(),
+    Mean = mean(Behavioural_Index),
+    SD = stats::sd(Behavioural_Index),
+    Median = stats::median(Behavioural_Index),
+    IQR = stats::IQR(Behavioural_Index),
+    Minimum = min(Behavioural_Index),
+    Maximum = max(Behavioural_Index),
+    .groups = "drop"
+  )
+
+# ------------------------------------------------------------
+# 11. Candidate thresholds
+# ------------------------------------------------------------
+
+# Method preserved from the previous 028 script:
+# candidate thresholds are midpoints between consecutive unique
+# Behavioural_Index values in the combined Control/Stress population.
+
+unique_index <- sort(
+  unique(
+    score_data$Behavioural_Index
+  )
+)
+
+if (length(unique_index) < 3L) {
+  stop(
+    "Too few unique Behavioural_Index values to evaluate thresholds."
+  )
+}
+
+candidate_thresholds <- (
+  unique_index[
+    -length(unique_index)
+  ] +
+    unique_index[
+      -1L
+    ]
+) / 2
+
+# ------------------------------------------------------------
+# 12. Cohen's d function
+# ------------------------------------------------------------
+
+cohen_d_pooled <- function(
+    above,
+    below
+) {
+
+  n_above <- length(
+    above
+  )
+
+  n_below <- length(
+    below
+  )
+
+  if (
+    n_above < 2L ||
+    n_below < 2L
+  ) {
+    return(
+      NA_real_
+    )
+  }
+
+  pooled_variance <- (
+    (n_above - 1L) *
+      stats::var(above) +
+      (n_below - 1L) *
+      stats::var(below)
+  ) / (
+    n_above +
+      n_below -
+      2L
+  )
+
+  if (
+    !is.finite(
+      pooled_variance
+    ) ||
+    pooled_variance <= 0
+  ) {
+    return(
+      NA_real_
+    )
+  }
+
+  (
+    mean(above) -
+      mean(below)
+  ) /
+    sqrt(
+      pooled_variance
+    )
+}
+
+# ------------------------------------------------------------
+# 13. Evaluate each candidate threshold
+# ------------------------------------------------------------
+
+threshold_results <- vector(
+  mode = "list",
+  length = length(
+    candidate_thresholds
+  )
+)
+
+for (
+  i in seq_along(
+    candidate_thresholds
+  )
+) {
+
+  threshold_i <-
+    candidate_thresholds[
+      i
+    ]
+
+  above_i <-
+    score_data$Behavioural_Index >
+      threshold_i
+
+  stress_above <- score_data$Behavioural_Index[
+    score_data$Treatment == "Stress" &
+      above_i
+  ]
+
+  stress_below <- score_data$Behavioural_Index[
+    score_data$Treatment == "Stress" &
+      !above_i
+  ]
+
+  n_stress_above <- length(
+    stress_above
+  )
+
+  n_stress_below <- length(
+    stress_below
+  )
+
+  if (
+    n_stress_above <
+      minimum_stress_group_size ||
+    n_stress_below <
+      minimum_stress_group_size
+  ) {
+    next
+  }
+
+  d_i <- cohen_d_pooled(
+    above = stress_above,
+    below = stress_below
+  )
+
+  contingency_i <- matrix(
+    c(
+      sum(
+        score_data$Treatment == "Control" &
+          above_i
+      ),
+      sum(
+        score_data$Treatment == "Stress" &
+          above_i
+      ),
+      sum(
+        score_data$Treatment == "Control" &
+          !above_i
+      ),
+      sum(
+        score_data$Treatment == "Stress" &
+          !above_i
+      )
+    ),
+    nrow = 2L,
+    byrow = TRUE,
+    dimnames = list(
+      Position = c(
+        "Above",
+        "Below"
+      ),
+      Treatment = c(
+        "Control",
+        "Stress"
+      )
+    )
+  )
+
+  fisher_i <- stats::fisher.test(
+    contingency_i,
+    alternative = "two.sided"
+  )
+
+  threshold_results[[i]] <- data.frame(
+    Threshold = threshold_i,
+    Stress_above = n_stress_above,
+    Stress_below = n_stress_below,
+    Control_above =
+      contingency_i[
+        "Above",
+        "Control"
+      ],
+    Control_below =
+      contingency_i[
+        "Below",
+        "Control"
+      ],
+    Cohen_d = d_i,
+    Fisher_p =
+      fisher_i$p.value,
+    Fisher_odds_ratio =
+      unname(
+        fisher_i$estimate
+      )
+  )
+}
+
+threshold_table <- dplyr::bind_rows(
+  threshold_results
+) %>%
+  dplyr::filter(
+    is.finite(
+      Cohen_d
+    ),
+    is.finite(
+      Fisher_p
+    )
+  )
+
+if (nrow(threshold_table) == 0L) {
+  stop(
+    "No valid Swaminathan-like candidate thresholds were obtained."
+  )
+}
+
+# ------------------------------------------------------------
+# 14. Normalise threshold evidence to 0–1
+# ------------------------------------------------------------
+
+min_max_normalise <- function(x) {
+
+  range_x <- range(
+    x,
+    na.rm = TRUE
+  )
+
+  if (
+    diff(
+      range_x
+    ) == 0
+  ) {
+    return(
+      rep(
+        1,
+        length(x)
+      )
+    )
+  }
+
+  (
+    x -
+      range_x[
+        1L
+      ]
+  ) /
+    diff(
+      range_x
+    )
+}
+
+threshold_table <- threshold_table %>%
+  dplyr::mutate(
+    Cohen_d_absolute =
+      abs(
+        Cohen_d
+      ),
+    Fisher_evidence =
+      -log10(
+        pmax(
+          Fisher_p,
+          .Machine$double.xmin
+        )
+      ),
+    Cohen_d_normalised =
+      min_max_normalise(
+        Cohen_d_absolute
+      ),
+    Fisher_normalised =
+      min_max_normalise(
+        Fisher_evidence
+      ),
+    Combined_score =
+      Cohen_d_normalised +
+        Fisher_normalised
+  )
+
+# ------------------------------------------------------------
+# 15. Select the operational threshold
+# ------------------------------------------------------------
+
+best_threshold <- threshold_table %>%
+  dplyr::arrange(
+    dplyr::desc(
+      Combined_score
+    ),
+    Fisher_p,
+    dplyr::desc(
+      Cohen_d_absolute
+    )
+  ) %>%
+  dplyr::slice(
+    1L
+  )
+
+optimal_threshold <-
+  best_threshold$Threshold[
+    1L
+  ]
+
+if (
+  length(optimal_threshold) != 1L ||
+  !is.finite(
+    optimal_threshold
+  )
+) {
+  stop(
+    "A valid optimal Swaminathan-like threshold was not identified."
+  )
+}
+
+# ------------------------------------------------------------
+# 16. Classify Stress fish
+# ------------------------------------------------------------
+
+classification <- score_data %>%
+  dplyr::mutate(
+    Swaminathan_class =
+      dplyr::case_when(
+        Treatment == "Control" ~
+          "Control",
+
+        Treatment == "Stress" &
+          Behavioural_Index >
+            optimal_threshold ~
+          "Resilient",
+
+        Treatment == "Stress" &
+          Behavioural_Index <=
+            optimal_threshold ~
+          "Susceptible",
+
+        TRUE ~
+          NA_character_
+      ),
+    Swaminathan_class = factor(
+      Swaminathan_class,
+      levels = c(
+        "Control",
+        "Susceptible",
+        "Resilient"
+      )
+    )
+  )
+
+if (
+  anyNA(
+    classification$Swaminathan_class
+  )
+) {
+  stop(
+    "Missing Swaminathan classifications were produced."
+  )
+}
+
+stress_classification <- classification %>%
+  dplyr::filter(
+    Treatment == "Stress"
+  )
+
+if (
+  nrow(stress_classification) != expected_stress_n ||
+  any(
+    as.character(
+      stress_classification$Swaminathan_class
+    ) == "Control"
+  )
+) {
+  stop(
+    "The final Swaminathan Stress classification failed the n = 89 audit."
+  )
+}
+
+classification_counts <- stress_classification %>%
+  dplyr::count(
+    Swaminathan_class,
+    name = "n",
+    .drop = FALSE
+  ) %>%
+  dplyr::mutate(
+    Percentage =
+      100 *
+      n /
+      expected_stress_n
+  )
+
+# ------------------------------------------------------------
+# 17. Threshold visualisation
+# ------------------------------------------------------------
+
+p_swaminathan <- ggplot2::ggplot(
+  classification,
+  ggplot2::aes(
+    x = Behavioural_Index,
+    fill = Treatment
+  )
+) +
+  ggplot2::geom_histogram(
+    position = "identity",
+    bins = 25,
+    alpha = 0.45,
+    colour = "black"
+  ) +
+  ggplot2::geom_vline(
+    xintercept =
+      optimal_threshold,
+    linetype = "dashed",
+    linewidth = 1
+  ) +
+  ggplot2::labs(
+    x = "Multivariate behavioural index",
+    y = "Frequency",
+    fill = NULL
+  ) +
+  ggplot2::theme_classic(
+    base_size = 14,
+    base_family = "Arial"
+  ) +
+  ggplot2::theme(
+    legend.position = "top"
+  )
+
+print(
+  p_swaminathan
+)
+
+ggplot2::ggsave(
+  filename = pdf_output,
+  plot = p_swaminathan,
+  device = grDevices::cairo_pdf,
+  width = 7.5,
+  height = 5.5,
+  units = "in",
+  bg = "white"
+)
+
+ggplot2::ggsave(
+  filename = tiff_output,
+  plot = p_swaminathan,
+  width = 7.5,
+  height = 5.5,
+  units = "in",
+  dpi = 600,
+  compression = "lzw",
+  bg = "white"
+)
+
+# ------------------------------------------------------------
+# 18. Export tables
+# ------------------------------------------------------------
+
+classification_export <- classification %>%
+  dplyr::select(
+    Author,
+    ID,
+    Traceability_ID,
+    Treatment,
+    dplyr::all_of(
+      behavioural_variables
+    ),
+    dplyr::all_of(
+      robust_variables
+    ),
+    dplyr::all_of(
+      pc_variables
+    ),
+    Behavioural_Index,
+    Swaminathan_class
+  ) %>%
+  dplyr::arrange(
+    Treatment,
+    Author,
+    ID
+  )
+
+pca_loadings_export <- data.frame(
+  Variable = rownames(
+    pca_control$rotation
+  ),
+  pca_control$rotation,
+  check.names = FALSE
+)
+
+index_weights_export <- data.frame(
+  PC = names(
+    index_weights
+  ),
+  Weight = as.numeric(
+    index_weights
+  )
+)
+
+openxlsx::write.xlsx(
+  list(
+    Control_reference_audit =
+      control_reference_audit,
+
+    Author_Treatment_counts =
+      author_treatment_counts,
+
+    PCA_variance =
+      variance_explained,
+
+    PCA_loadings =
+      pca_loadings_export,
+
+    Index_weights =
+      index_weights_export,
+
+    Index_summary =
+      index_summary,
+
+    Threshold_candidates =
+      threshold_table,
+
+    Optimal_threshold =
+      best_threshold,
+
+    Stress_classification_counts =
+      classification_counts,
+
+    Classification =
+      classification_export
+  ),
+  file =
+    xlsx_output,
+  overwrite = TRUE
+)
+
+# ------------------------------------------------------------
+# 19. Save definitive Objective 4 Swaminathan objects
+# ------------------------------------------------------------
+
+saveRDS(
+  classification,
+  classification_object_output
+)
+
+saveRDS(
+  threshold_table,
+  threshold_candidates_output
+)
+
+saveRDS(
+  best_threshold,
+  optimal_threshold_output
+)
+
+# Stored for downstream compatibility, but this is the inherited
+# Objective 1 PCA object and was not refitted in Objective 4.
+saveRDS(
+  pca_control,
+  pca_model_output
+)
+
+saveRDS(
+  index_weights,
+  index_weights_output
+)
+
+parameters_object <- list(
+  Analysis =
+    "Objective 4 - Swaminathan-like dynamic thresholding",
+  Analytical_population =
+    "89 Stress fish classified; 89 Control fish used as reference",
+  Traceability =
+    expected_traceability,
+  Normalisation =
+    expected_normalisation,
+  Behavioural_variables =
+    behavioural_variables,
+  Robust_variables =
+    robust_variables,
+  PCA_reference =
+    "Definitive Control-derived Objective 1 PCA; not refitted",
+  PCA_source_file =
+    pca_model_file,
+  Population_source_file =
+    population_file,
+  Stress_source_file =
+    stress_objective3_file,
+  Candidate_threshold_rule =
+    paste(
+      "Midpoints between consecutive unique Behavioural_Index",
+      "values in the combined Control/Stress population"
+    ),
+  Minimum_stress_group_size =
+    minimum_stress_group_size,
+  Index_direction =
+    "Higher values indicate greater Control similarity",
+  Index_weights =
+    index_weights,
+  Optimal_threshold =
+    optimal_threshold,
+  Legacy_variables_present_but_not_used =
+    legacy_variables_present
+)
+
+saveRDS(
+  parameters_object,
+  parameters_output
+)
+
+capture.output(
+  utils::sessionInfo(),
+  file =
+    session_info_output
+)
+
+# ------------------------------------------------------------
+# 20. Confirm output creation
+# ------------------------------------------------------------
+
+expected_output_files <- c(
+  classification_object_output,
+  threshold_candidates_output,
+  optimal_threshold_output,
+  pca_model_output,
+  index_weights_output,
+  parameters_output,
+  xlsx_output,
+  pdf_output,
+  tiff_output,
+  session_info_output
+)
+
+missing_output_files <- expected_output_files[
+  !file.exists(
+    expected_output_files
+  )
+]
+
+if (length(missing_output_files) > 0L) {
+  stop(
+    "The following expected Swaminathan outputs were not created:\n",
+    paste(
+      missing_output_files,
+      collapse = "\n"
+    )
+  )
+}
+
+# ------------------------------------------------------------
+# 21. Final console audit
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("OBJECTIVE 4 - SWAMINATHAN-LIKE CLASSIFICATION\n")
+cat("============================================================\n")
+
+cat(
+  "\nCorrected analytical dependencies:\n",
+  "Population source: ",
+  population_file,
+  "\nStress provenance source: ",
+  stress_objective3_file,
+  "\nPCA source: ",
+  pca_model_file,
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nTraceability: ",
+  expected_traceability,
+  "\nNormalisation: ",
+  expected_normalisation,
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nPopulation sizes by Author and Treatment:\n"
+)
+
+print(
+  author_treatment_counts,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nAuthor-specific Control-reference audit ",
+  "(median = 0; scaled MAD = 1):\n",
+  sep = ""
+)
+
+print(
+  control_reference_audit,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nMaximum absolute difference between the corrected population ",
+  "and definitive Objective 3 Stress coordinates:\n",
+  sep = ""
+)
+
+print(
+  stress_provenance_difference
+)
+
+cat(
+  "\nMaximum absolute difference between projected and stored ",
+  "Objective 1 Control PC1-PC4 scores:\n",
+  sep = ""
+)
+
+print(
+  pca_projection_difference
+)
+
+cat(
+  "\nPCA variance inherited from Objective 1:\n"
+)
+
+print(
+  variance_explained,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nPC weights used in the Behavioural Index:\n"
+)
+
+print(
+  index_weights
+)
+
+cat(
+  "\nBehavioural Index by Treatment:\n"
+)
+
+print(
+  index_summary,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nOptimal Swaminathan-like threshold:\n"
+)
+
+print(
+  best_threshold
+)
+
+cat(
+  "\nFinal Stress classification:\n"
+)
+
+print(
+  classification_counts,
+  n = Inf,
+  width = Inf
+)
+
+if (
+  length(
+    legacy_variables_present
+  ) > 0L
+) {
+  cat(
+    "\nLegacy mean/SD-standardised variables detected upstream but ",
+    "NOT USED by this script:\n",
+    paste(
+      legacy_variables_present,
+      collapse = ", "
+    ),
+    "\n",
+    sep = ""
+  )
+}
+
+cat(
+  "\nNo behavioural variable was renormalised and the PCA was not refitted.\n"
+)
+
+cat(
+  "The final classifier was applied only to the 89 Stress fish.\n"
+)
+
+cat(
+  "\nOutputs saved successfully.\n"
+)
+
+cat("\n============================================================\n")
