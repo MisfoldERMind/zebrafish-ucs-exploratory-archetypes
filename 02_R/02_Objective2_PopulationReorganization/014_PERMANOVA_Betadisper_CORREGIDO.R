@@ -42,14 +42,7 @@
 # 1. Project directory
 # ------------------------------------------------------------
 
-project_root <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+project_root <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(project_root)) {
   stop(
@@ -1005,3 +998,544 @@ dispersion_descriptives <- dispersion_individual %>%
       Distance_to_group_spatial_median
     ),
     SD = stats::sd(
+      Distance_to_group_spatial_median
+    ),
+    Median_distance = stats::median(
+      Distance_to_group_spatial_median
+    ),
+    Q1 = as.numeric(
+      stats::quantile(
+        Distance_to_group_spatial_median,
+        probs = 0.25,
+        names = FALSE,
+        type = 7
+      )
+    ),
+    Q3 = as.numeric(
+      stats::quantile(
+        Distance_to_group_spatial_median,
+        probs = 0.75,
+        names = FALSE,
+        type = 7
+      )
+    ),
+    IQR = stats::IQR(
+      Distance_to_group_spatial_median,
+      type = 7
+    ),
+    Minimum = min(
+      Distance_to_group_spatial_median
+    ),
+    Maximum = max(
+      Distance_to_group_spatial_median
+    ),
+    .groups = "drop"
+  ) %>%
+  dplyr::arrange(Treatment)
+
+if (
+  nrow(dispersion_descriptives) != 2L ||
+  !identical(
+    as.character(
+      dispersion_descriptives$Treatment
+    ),
+    required_treatments
+  )
+) {
+  stop(
+    "The dispersion descriptive table is incomplete or incorrectly ",
+    "ordered."
+  )
+}
+
+control_mean_dispersion <- dispersion_descriptives$
+  Mean_distance[
+    dispersion_descriptives$Treatment == "Control"
+  ]
+
+stress_mean_dispersion <- dispersion_descriptives$
+  Mean_distance[
+    dispersion_descriptives$Treatment == "Stress"
+  ]
+
+control_median_dispersion <- dispersion_descriptives$
+  Median_distance[
+    dispersion_descriptives$Treatment == "Control"
+  ]
+
+stress_median_dispersion <- dispersion_descriptives$
+  Median_distance[
+    dispersion_descriptives$Treatment == "Stress"
+  ]
+
+dispersion_contrast <- tibble::tibble(
+  Comparison = "Stress minus Control",
+  Distance_definition = "Euclidean distance to group spatial median",
+  Control_mean_distance = control_mean_dispersion,
+  Stress_mean_distance = stress_mean_dispersion,
+  Mean_difference = (
+    stress_mean_dispersion -
+      control_mean_dispersion
+  ),
+  Stress_to_Control_mean_ratio = (
+    stress_mean_dispersion /
+      control_mean_dispersion
+  ),
+  Control_median_distance = control_median_dispersion,
+  Stress_median_distance = stress_median_dispersion,
+  Median_difference = (
+    stress_median_dispersion -
+      control_median_dispersion
+  )
+)
+
+# ------------------------------------------------------------
+# 11. Integrated interpretation flag
+# ------------------------------------------------------------
+
+alpha_interpretation <- 0.05
+
+interpretation_flag <- dplyr::case_when(
+  permanova_p < alpha_interpretation &
+    permdisp_p >= alpha_interpretation ~
+    paste0(
+      "Author-adjusted treatment-associated multivariate location ",
+      "difference ",
+      "without evidence of unequal multivariate dispersion."
+    ),
+
+  permanova_p < alpha_interpretation &
+    permdisp_p < alpha_interpretation ~
+    paste0(
+      "Author-adjusted treatment-associated multivariate difference ",
+      "accompanied ",
+      "by unequal multivariate dispersion; PERMANOVA must be ",
+      "interpreted jointly with PERMDISP."
+    ),
+
+  permanova_p >= alpha_interpretation &
+    permdisp_p < alpha_interpretation ~
+    paste0(
+      "No PERMANOVA evidence of an Author-adjusted treatment-associated ",
+      "location ",
+      "difference, but multivariate dispersion differs between groups."
+    ),
+
+  TRUE ~
+    paste0(
+      "No permutation evidence of either an Author-adjusted ",
+      "treatment-associated multivariate location difference or ",
+      "unequal multivariate dispersion at alpha = 0.05."
+    )
+)
+
+analysis_summary <- tibble::tibble(
+  Comparison = "Control versus Stress",
+  Design = "Independent fish within four Author cohorts",
+  Coordinate_system = "Control-referenced robust behavioural space",
+  Distance_metric = "Euclidean",
+  Dimensions = length(robust_variables),
+  Authors = length(expected_authors),
+  Control_n = group_counts$n[
+    group_counts$Treatment == "Control"
+  ],
+  Stress_n = group_counts$n[
+    group_counts$Treatment == "Stress"
+  ],
+  Observed_centroid_displacement_4D =
+    observed_centroid_displacement,
+  PERMANOVA_model =
+    "Author + Treatment; marginal Treatment test",
+  PERMANOVA_permutation_scheme =
+    "Free permutations restricted within Author blocks",
+  PERMANOVA_F = permanova_F,
+  PERMANOVA_R2 = permanova_R2,
+  PERMANOVA_p = permanova_p,
+  PERMDISP_reference = "Group spatial median",
+  PERMDISP_permutation_scheme =
+    "Residual permutations restricted within Author blocks",
+  PERMDISP_F = permdisp_F,
+  PERMDISP_NPerm = permdisp_NPerm,
+  PERMDISP_p = permdisp_p,
+  Permutations = n_permutations,
+  Interpretation_flag = interpretation_flag
+)
+
+# ------------------------------------------------------------
+# 12. Save definitive corrected outputs
+# ------------------------------------------------------------
+
+results_object <- list(
+  Objective = "Objective 2",
+  Comparison_design =
+    "Independent Control and Stress fish within four Author cohorts",
+  Input_population_file = population_file,
+  Input_centroid_displacement_file = centroid_displacement_file,
+  Coordinate_system = "Control-referenced robust behavioural space",
+  Behavioural_variables = behavioural_variables,
+  Robust_variables = robust_variables,
+  Distance_metric = "Euclidean",
+  Group_counts = group_counts,
+  Author_by_Treatment_counts = cohort_group_counts,
+  Author_reference_audit = control_reference_audit,
+  Observed_centroid_displacement_4D =
+    observed_centroid_displacement,
+  PERMANOVA = list(
+    Model = permanova_model,
+    Table = permanova_table,
+    Formula = "distance_matrix ~ Author + Treatment",
+    Adjustment_variable = "Author",
+    Test_type = "Marginal Treatment test (by = 'margin')",
+    Permutations = n_permutations,
+    Seed = permanova_seed,
+    Permutation_scheme =
+      "Free permutations restricted within Author blocks",
+    Permutation_design = permanova_permutation_design
+  ),
+  PERMDISP = list(
+    Model = dispersion_model,
+    Unblocked_parametric_ANOVA_secondary = dispersion_anova,
+    Unblocked_parametric_ANOVA_table_secondary =
+      dispersion_anova_table,
+    Permutation_test =
+      dispersion_permutation_test,
+    Permutation_table = permdisp_table,
+    Centre_type = "Spatial median",
+    Bias_adjustment = FALSE,
+    Permutations = n_permutations,
+    Seed = permdisp_seed,
+    Permutation_scheme =
+      "Residual permutations restricted within Author blocks",
+    Permutation_design = permdisp_permutation_design,
+    Eigenvalues = dispersion_eigenvalues
+  ),
+  Dispersion_individual = dispersion_individual,
+  Dispersion_descriptives = dispersion_descriptives,
+  Dispersion_contrast = dispersion_contrast,
+  Analysis_summary = analysis_summary
+)
+
+saveRDS(
+  distance_matrix,
+  distance_output
+)
+
+saveRDS(
+  dispersion_model,
+  betadisper_output
+)
+
+saveRDS(
+  results_object,
+  results_output
+)
+
+utils::write.csv(
+  permanova_table,
+  permanova_csv_output,
+  row.names = FALSE,
+  na = ""
+)
+
+utils::write.csv(
+  permdisp_table,
+  permdisp_csv_output,
+  row.names = FALSE,
+  na = ""
+)
+
+utils::write.csv(
+  cohort_group_counts,
+  cohort_counts_audit_csv_output,
+  row.names = FALSE,
+  na = ""
+)
+
+utils::write.csv(
+  control_reference_audit,
+  author_reference_audit_csv_output,
+  row.names = FALSE,
+  na = ""
+)
+
+utils::write.csv(
+  dispersion_anova_table,
+  permdisp_anova_csv_output,
+  row.names = FALSE,
+  na = ""
+)
+
+utils::write.csv(
+  dispersion_descriptives,
+  dispersion_descriptives_csv_output,
+  row.names = FALSE,
+  na = ""
+)
+
+utils::write.csv(
+  dispersion_contrast,
+  dispersion_contrast_csv_output,
+  row.names = FALSE,
+  na = ""
+)
+
+capture.output(
+  utils::sessionInfo(),
+  file = session_info_output
+)
+
+# ------------------------------------------------------------
+# 13. Confirm output creation
+# ------------------------------------------------------------
+
+expected_output_files <- c(
+  distance_output,
+  betadisper_output,
+  results_output,
+  permanova_csv_output,
+  permdisp_csv_output,
+  cohort_counts_audit_csv_output,
+  author_reference_audit_csv_output,
+  permdisp_anova_csv_output,
+  dispersion_descriptives_csv_output,
+  dispersion_contrast_csv_output,
+  session_info_output
+)
+
+missing_output_files <- expected_output_files[
+  !file.exists(expected_output_files)
+]
+
+if (length(missing_output_files) > 0L) {
+  stop(
+    "The following expected output files were not created:\n",
+    paste(missing_output_files, collapse = "\n")
+  )
+}
+
+# ------------------------------------------------------------
+# 14. Identify obsolete outputs from the former workflow
+# ------------------------------------------------------------
+
+legacy_population_file <- file.path(
+  processed_dir,
+  "population_control_stress_z.rds"
+)
+
+legacy_files <- c(
+  legacy_population_file,
+  file.path(
+    project_root,
+    "03_Results",
+    "Statistics",
+    "PERMANOVA_Control_Stress.csv"
+  ),
+  file.path(
+    project_root,
+    "03_Results",
+    "Statistics",
+    "Betadisper_Control_Stress.csv"
+  ),
+  file.path(
+    tables_dir,
+    "Objective2_PERMDISP_ParametricANOVA_4D_RobustZ.csv"
+  )
+)
+
+existing_legacy_files <- legacy_files[
+  file.exists(legacy_files)
+]
+
+if (length(existing_legacy_files) > 0L) {
+  warning(
+    "Legacy files from former Objective 2 workflows were detected. ",
+    "They were not used or overwritten:\n",
+    paste(existing_legacy_files, collapse = "\n")
+  )
+}
+
+# ------------------------------------------------------------
+# 15. Final console audit
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("OBJECTIVE 2 - PERMANOVA AND MULTIVARIATE DISPERSION\n")
+cat("============================================================\n")
+
+cat(
+  "\nIndependent fish by Treatment:\n"
+)
+
+print(
+  group_counts,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nAuthor x Treatment permutation blocks:\n"
+)
+
+print(
+  cohort_group_counts,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nAuthor-specific control-reference audit ",
+  "(expected median = 0 and scaled MAD = 1):\n",
+  sep = ""
+)
+
+print(
+  control_reference_audit,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nObserved 4D centroid displacement reproduced from Script 012: ",
+  format(
+    observed_centroid_displacement,
+    digits = 10
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nAuthor-adjusted PERMANOVA for Treatment:\n",
+  "Model: Author + Treatment; Treatment tested marginally after ",
+  "adjustment for Author.\n",
+  "Permutation scheme: free permutations restricted within Author ",
+  "blocks (9,999).\n",
+  sep = ""
+)
+
+print(
+  permanova_table,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nPERMDISP permutation test ",
+  "(distances to group spatial medians):\n",
+  "Permutation scheme: residual permutations restricted within ",
+  "Author blocks (9,999).\n",
+  sep = ""
+)
+
+print(
+  permdisp_table,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nDescriptive multivariate dispersion:\n"
+)
+
+print(
+  dispersion_descriptives,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nStress-minus-Control dispersion contrast:\n"
+)
+
+print(
+  dispersion_contrast,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nIntegrated interpretation:\n",
+  interpretation_flag,
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nAnalytical constraint: PERMANOVA and PERMDISP must be ",
+  "interpreted jointly because distance-based location tests can ",
+  "be affected by differences in within-group dispersion.\n",
+  sep = ""
+)
+
+cat(
+  "\nDefinitive corrected outputs saved as:\n",
+  normalizePath(
+    distance_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    betadisper_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    results_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    permanova_csv_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    permdisp_csv_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    cohort_counts_audit_csv_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    author_reference_audit_csv_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    permdisp_anova_csv_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    dispersion_descriptives_csv_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    dispersion_contrast_csv_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  normalizePath(
+    session_info_output,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n",
+  sep = ""
+)
+
+cat("\n============================================================\n")
