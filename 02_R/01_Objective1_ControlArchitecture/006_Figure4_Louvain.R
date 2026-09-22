@@ -29,14 +29,7 @@
 # 1. Project directory
 # ------------------------------------------------------------
 
-base_dir <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+base_dir <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(base_dir)) {
   stop("Project directory not found:\n", base_dir)
@@ -1005,3 +998,325 @@ if (!is.finite(percent1) || !is.finite(percent2)) {
 # ------------------------------------------------------------
 
 segment_palette <- stats::setNames(
+  c("#63B8A6", "#F07A5A"),
+  segment_levels
+)
+
+figure_louvain_descriptive <- ggplot2::ggplot(
+  plot_data,
+  ggplot2::aes(x = PC1, y = PC2)
+) +
+  ggplot2::geom_point(
+    ggplot2::aes(colour = Algorithmic_Segment),
+    size = 2.6,
+    alpha = 0.85
+  ) +
+  ggplot2::geom_point(
+    data = pca_centroids,
+    ggplot2::aes(x = PC1, y = PC2),
+    inherit.aes = FALSE,
+    shape = 4,
+    size = 6,
+    stroke = 1.5,
+    colour = "black"
+  ) +
+  ggrepel::geom_label_repel(
+    data = pca_centroids,
+    ggplot2::aes(
+      x = PC1,
+      y = PC2,
+      label = Algorithmic_Segment
+    ),
+    inherit.aes = FALSE,
+    size = 4,
+    fontface = "bold",
+    show.legend = FALSE,
+    seed = 1234L
+  ) +
+  ggplot2::scale_colour_manual(
+    values = segment_palette,
+    breaks = segment_levels,
+    drop = FALSE
+  ) +
+  ggplot2::labs(
+    x = paste0("PC1 (", percent1, "%)"),
+    y = paste0("PC2 (", percent2, "%)"),
+    colour = "Exploratory segment",
+    caption = paste0(
+      "Descriptive PCA projection only; no evidence of discrete communities ",
+      "(selection-adjusted p = ",
+      formatC(primary_empirical_p, format = "f", digits = 3),
+      ")."
+    )
+  ) +
+  ggplot2::coord_equal() +
+  ggplot2::theme_classic(base_size = 14) +
+  ggplot2::theme(
+    panel.border = ggplot2::element_rect(
+      colour = "black",
+      fill = NA,
+      linewidth = 0.8
+    ),
+    axis.title = ggplot2::element_text(face = "bold"),
+    axis.text = ggplot2::element_text(colour = "black"),
+    legend.position = "right",
+    plot.caption = ggplot2::element_text(
+      size = 9,
+      colour = "black",
+      hjust = 0
+    )
+  )
+
+print(figure_louvain_descriptive)
+
+# ------------------------------------------------------------
+# 14. Output paths
+# ------------------------------------------------------------
+
+pdf_output <- file.path(
+  figures_dir,
+  "FigureS_Louvain_ExploratorySegmentation.pdf"
+)
+
+tiff_output <- file.path(
+  figures_dir,
+  "FigureS_Louvain_ExploratorySegmentation.tiff"
+)
+
+membership_csv <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentation_Membership.csv"
+)
+
+segment_sizes_csv <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentation_Sizes.csv"
+)
+
+pca_centroids_csv <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentation_PC_Centroids.csv"
+)
+
+graph_summary_csv <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentation_GraphSummary.csv"
+)
+
+dependency_audit_csv <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentation_DependencyAudit.csv"
+)
+
+directed_relations_csv <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentation_DirectedKNNRelations.csv"
+)
+
+undirected_edges_csv <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentation_WeightedEdges.csv"
+)
+
+# ------------------------------------------------------------
+# 15. Export the figure and audit tables
+# ------------------------------------------------------------
+
+ggplot2::ggsave(
+  filename = pdf_output,
+  plot = figure_louvain_descriptive,
+  width = 7,
+  height = 6.3,
+  units = "in"
+)
+
+ggplot2::ggsave(
+  filename = tiff_output,
+  plot = figure_louvain_descriptive,
+  width = 7,
+  height = 6.3,
+  units = "in",
+  dpi = 600,
+  compression = "lzw"
+)
+
+dependency_audit <- tibble::tibble(
+  Dependency = c(
+    "005 robust data",
+    "005 PCA scores",
+    "005 PCA variance",
+    "006.0 optimisation results",
+    "006.0 optimisation memberships",
+    "006.1 complete null-model results",
+    "006.1 modularity-test CSV"
+  ),
+  File = required_input_files,
+  MD5 = unname(tools::md5sum(required_input_files)),
+  Modified = as.character(file.info(required_input_files)$mtime)
+)
+
+utils::write.csv(segment_membership, membership_csv, row.names = FALSE)
+utils::write.csv(segment_sizes, segment_sizes_csv, row.names = FALSE)
+utils::write.csv(pca_centroids, pca_centroids_csv, row.names = FALSE)
+utils::write.csv(graph_summary, graph_summary_csv, row.names = FALSE)
+utils::write.csv(dependency_audit, dependency_audit_csv, row.names = FALSE)
+utils::write.csv(edge_list_directed, directed_relations_csv, row.names = FALSE)
+utils::write.csv(edge_list_undirected, undirected_edges_csv, row.names = FALSE)
+
+# ------------------------------------------------------------
+# 16. Save explicitly descriptive objects
+# ------------------------------------------------------------
+
+segmented_data_rds <- file.path(
+  objects_dir,
+  "objective1_control_louvain_exploratory_segmentation.rds"
+)
+
+membership_rds <- file.path(
+  objects_dir,
+  "objective1_louvain_exploratory_membership.rds"
+)
+
+graph_rds <- file.path(
+  objects_dir,
+  "objective1_louvain_exploratory_graph.rds"
+)
+
+graph_summary_rds <- file.path(
+  objects_dir,
+  "objective1_louvain_exploratory_graph_summary.rds"
+)
+
+plot_data_rds <- file.path(
+  objects_dir,
+  "objective1_pca_with_louvain_exploratory_segmentation.rds"
+)
+
+inference_status_rds <- file.path(
+  objects_dir,
+  "objective1_louvain_inference_status.rds"
+)
+
+figure_rds <- file.path(
+  objects_dir,
+  "objective1_figureS_louvain_exploratory_segmentation.rds"
+)
+
+session_info_file <- file.path(
+  objects_dir,
+  "objective1_louvain_exploratory_segmentation_sessionInfo.txt"
+)
+
+saveRDS(control_segmented, segmented_data_rds)
+saveRDS(segment_membership, membership_rds)
+saveRDS(graph_knn, graph_rds)
+saveRDS(graph_summary, graph_summary_rds)
+saveRDS(plot_data, plot_data_rds)
+saveRDS(inference_status, inference_status_rds)
+saveRDS(figure_louvain_descriptive, figure_rds)
+
+capture.output(utils::sessionInfo(), file = session_info_file)
+
+# Deliberately not written:
+# - a new Louvain model;
+# - a validated cluster-profile object;
+# - higher-/lower-exploration labels;
+# - downstream classification objects for stressed fish.
+
+# ------------------------------------------------------------
+# 17. Verify outputs and print the final audit
+# ------------------------------------------------------------
+
+expected_output_files <- c(
+  pdf_output,
+  tiff_output,
+  membership_csv,
+  segment_sizes_csv,
+  pca_centroids_csv,
+  graph_summary_csv,
+  dependency_audit_csv,
+  directed_relations_csv,
+  undirected_edges_csv,
+  segmented_data_rds,
+  membership_rds,
+  graph_rds,
+  graph_summary_rds,
+  plot_data_rds,
+  inference_status_rds,
+  figure_rds,
+  session_info_file
+)
+
+output_information <- file.info(expected_output_files)
+
+if (
+  any(!file.exists(expected_output_files)) ||
+    any(is.na(output_information$size)) ||
+    any(output_information$size <= 0)
+) {
+  stop("At least one expected descriptive Louvain output is absent or empty.")
+}
+
+cat("\n============================================================\n")
+cat("DESCRIPTIVE LOUVAIN SEGMENTATION AFTER NULL-MODEL TEST\n")
+cat("============================================================\n")
+cat("\nControl fish: ", number_of_fish, "\n", sep = "")
+cat("Traceability: Author + ID\n")
+cat("Selected k imported from 006.1: ", selected_k, "\n", sep = "")
+cat(
+  "Algorithmic segments imported from 006.0: ",
+  selected_number_of_segments,
+  " (",
+  paste(sort(segment_sizes$n), collapse = "/"),
+  ")\n",
+  sep = ""
+)
+cat(
+  "Observed weighted modularity: ",
+  sprintf("%.6f", reconstructed_modularity),
+  "\n",
+  sep = ""
+)
+cat(
+  "Primary selection-adjusted empirical p: ",
+  sprintf("%.9f", primary_empirical_p),
+  "\n",
+  sep = ""
+)
+cat(
+  "Evidence of discrete communities: ",
+  toupper(as.character(evidence_of_discrete_communities)),
+  "\n",
+  sep = ""
+)
+cat(
+  "Interpretation: descriptive segmentation of a continuous ",
+  "locomotor-exploratory space.\n"
+)
+
+cat("\nPrimary 006.1 result:\n")
+print(primary_test, row.names = FALSE)
+
+cat("\nWithin-Author robust-normalisation audit:\n")
+print(robust_audit, n = Inf, width = Inf)
+
+cat("\nSelected 006.0 result:\n")
+print(selected_result_006_0, n = Inf, width = Inf)
+
+cat("\nGraph summary:\n")
+print(graph_summary, n = Inf, width = Inf)
+
+cat("\nAlgorithmic segment sizes:\n")
+print(segment_sizes, n = Inf, width = Inf)
+
+cat(
+  "\nDescriptive figure saved as:\n",
+  normalizePath(pdf_output, winslash = "/", mustWork = TRUE),
+  "\n",
+  normalizePath(tiff_output, winslash = "/", mustWork = TRUE),
+  "\n",
+  sep = ""
+)
+
+cat("\nAll dependency and integrity checks passed.\n")
+cat("============================================================\n")
