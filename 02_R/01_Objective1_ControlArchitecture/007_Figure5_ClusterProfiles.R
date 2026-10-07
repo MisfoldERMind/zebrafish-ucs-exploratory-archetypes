@@ -1,28 +1,124 @@
 # ============================================================
-# 007_Figure5_ClusterProfiles.R
+# 007_FigureS_ExploratorySegmentSummaries.R
 #
 # Objective 1
-# Behavioural profiles of the final Louvain clusters in the
-# LAPCOM control population.
+# Supplementary descriptive summaries of the exploratory
+# kNN-Louvain segmentation of the LAPCOM control population.
 #
-# Required upstream script: 006_Figure4_Louvain.R
-# Definitive configuration: weighted undirected union kNN,
-# k = 56, two clusters, robust z-score using MAD x 1.4826.
+# Required upstream scripts, in order:
+#   005_Figure3_PCA.R
+#   006.0_Optimisation_k_Louvain.R
+#   006.1_ModularityNullTest_Louvain.R
+#   006_Figure4_Louvain.R (post-null-model corrected version)
+#
+# The k = 45 partition contains two algorithmic segments of
+# 40 and 49 fish. The formal selection-adjusted null-model test
+# did not support discrete behavioural communities. Therefore,
+# this script:
+#   - imports the segmentation; it never reruns Louvain;
+#   - uses Author + ID as the traceability key;
+#   - verifies robust normalisation separately within Author;
+#   - provides descriptive summaries only;
+#   - performs no inferential comparisons between segments;
+#   - uses no biological, higher/lower, or phenotype labels;
+#   - does not create a main-text Figure 5 or classification object.
+#
+# The displayed variables are the same variables used to build
+# the partition. Their segment-wise summaries are consequently a
+# circular description of the algorithmic split, not independent
+# evidence of discrete behavioural categories.
 # ============================================================
 
 # ------------------------------------------------------------
 # 1. Project and packages
 # ------------------------------------------------------------
 
-base_dir <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
-
-if (!dir.exists(base_dir)) {
-  stop("Project directory not found:\n", base_dir)
+find_project_root <- function(start_dir = getwd()) {
+  
+  environment_root <- trimws(
+    Sys.getenv(
+      "LAPCOM_UCS_PROJECT_ROOT",
+      unset = ""
+    )
+  )
+  
+  candidate_dirs <- character(0)
+  
+  if (nzchar(environment_root)) {
+    candidate_dirs <- c(
+      candidate_dirs,
+      environment_root
+    )
+  }
+  
+  candidate_dirs <- c(
+    candidate_dirs,
+    start_dir
+  )
+  
+  for (candidate_dir in candidate_dirs) {
+    
+    if (!dir.exists(candidate_dir)) {
+      next
+    }
+    
+    current_dir <- normalizePath(
+      candidate_dir,
+      winslash = "/",
+      mustWork = TRUE
+    )
+    
+    repeat {
+      
+      has_data <- dir.exists(
+        file.path(
+          current_dir,
+          "01_Data"
+        )
+      )
+      
+      has_results <- dir.exists(
+        file.path(
+          current_dir,
+          "03_Results"
+        )
+      )
+      
+      if (has_data && has_results) {
+        return(current_dir)
+      }
+      
+      parent_dir <- dirname(current_dir)
+      
+      if (identical(parent_dir, current_dir)) {
+        break
+      }
+      
+      current_dir <- parent_dir
+    }
+  }
+  
+  stop(
+    "Could not locate the project root.\n",
+    "Expected a directory containing both '01_Data' and '03_Results'.\n",
+    "Current working directory:\n",
+    getwd()
+  )
 }
+
+base_dir <- find_project_root()
 
 setwd(base_dir)
 
+cat(
+  "Project root detected:\n",
+  base_dir,
+  "\n",
+  sep = ""
+)
+
 required_packages <- c("dplyr", "tidyr", "tibble", "ggplot2")
+
 missing_packages <- required_packages[
   !vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)
 ]
@@ -40,7 +136,7 @@ library(tibble)
 library(ggplot2)
 
 # ------------------------------------------------------------
-# 2. Input and output paths
+# 2. Input and output directories
 # ------------------------------------------------------------
 
 objects_dir <- file.path("03_Results", "Objects")
@@ -53,72 +149,386 @@ for (directory_i in c(objects_dir, tables_dir, figures_dir)) {
   }
 }
 
-louvain_data_file <- file.path(
+# ------------------------------------------------------------
+# 3. Required inputs from 006.0, 006.1 and corrected 006
+# ------------------------------------------------------------
+
+# Outputs integrated and validated by the corrected 006 script.
+
+segmented_data_file <- file.path(
   objects_dir,
-  "objective1_control_robust_louvain.rds"
+  "objective1_control_louvain_exploratory_segmentation.rds"
 )
 
-selected_configuration_file <- file.path(
+integrated_membership_file <- file.path(
   objects_dir,
-  "objective1_selected_louvain_configuration_robust.rds"
+  "objective1_louvain_exploratory_membership.rds"
 )
 
-selected_membership_file <- file.path(
+inference_status_file <- file.path(
   objects_dir,
-  "objective1_selected_louvain_membership_robust.rds"
+  "objective1_louvain_inference_status.rds"
 )
 
 graph_summary_file <- file.path(
   objects_dir,
-  "objective1_louvain_graph_summary_robust.rds"
+  "objective1_louvain_exploratory_graph_summary.rds"
 )
 
-required_input_files <- c(
-  louvain_data_file,
-  selected_configuration_file,
-  selected_membership_file,
+corrected_006_dependency_audit_file <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentation_DependencyAudit.csv"
+)
+
+# Direct 006.0 dependencies used to verify the imported solution.
+
+optimisation_results_file <- file.path(
+  objects_dir,
+  "objective1_louvain_optimisation_results_robust.rds"
+)
+
+optimisation_memberships_file <- file.path(
+  objects_dir,
+  "objective1_louvain_optimisation_memberships_robust.rds"
+)
+
+# Direct 006.1 dependency used to verify the inferential status.
+
+modularity_tests_csv_file <- file.path(
+  tables_dir,
+  "Objective1_ModularityNullTests.csv"
+)
+
+modularity_null_results_file <- file.path(
+  objects_dir,
+  "objective1_modularity_null_test_results.rds"
+)
+
+integrated_object_files <- c(
+  segmented_data_file,
+  integrated_membership_file,
+  inference_status_file,
   graph_summary_file
 )
+
+integrated_input_files <- c(
+  integrated_object_files,
+  corrected_006_dependency_audit_file
+)
+
+source_input_files <- c(
+  optimisation_results_file,
+  optimisation_memberships_file,
+  modularity_null_results_file,
+  modularity_tests_csv_file
+)
+
+required_input_files <- c(integrated_input_files, source_input_files)
 
 missing_input_files <- required_input_files[!file.exists(required_input_files)]
 
 if (length(missing_input_files) > 0L) {
   stop(
-    "The following required files were not found:\n",
+    "The following required inputs were not found:\n",
     paste(missing_input_files, collapse = "\n"),
-    "\n\nRun 006_Figure4_Louvain.R before this script."
+    "\n\nRun 006.0, 006.1 and the corrected 006 script before this script."
+  )
+}
+
+# In the corrected 006 script, its dependency audit is written before
+# its integrated RDS outputs. An integrated object that predates the
+# audit therefore indicates a mixed or stale set of corrected 006 files.
+
+input_information <- file.info(required_input_files)
+
+if (
+  min(input_information[integrated_object_files, "mtime"]) <
+  input_information[corrected_006_dependency_audit_file, "mtime"]
+) {
+  stop(
+    "At least one corrected 006 object predates its dependency audit. ",
+    "Rerun the corrected 006 script before this script."
   )
 }
 
 # ------------------------------------------------------------
-# 3. Load and validate upstream objects
+# 4. Load dependency objects
 # ------------------------------------------------------------
 
-control_louvain <- readRDS(louvain_data_file)
-selected_configuration <- readRDS(selected_configuration_file)
-selected_membership <- readRDS(selected_membership_file)
+control_segmented <- readRDS(segmented_data_file)
+integrated_membership <- readRDS(integrated_membership_file)
+inference_status <- readRDS(inference_status_file)
 graph_summary <- readRDS(graph_summary_file)
+results_by_k <- readRDS(optimisation_results_file)
+memberships_by_k <- readRDS(optimisation_memberships_file)
 
-if (!is.data.frame(control_louvain)) {
-  stop("The final Louvain object is not a data frame.")
+modularity_tests <- utils::read.csv(
+  modularity_tests_csv_file,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+corrected_006_dependency_audit <- utils::read.csv(
+  corrected_006_dependency_audit_file,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+if (!is.data.frame(control_segmented)) {
+  stop("The corrected 006 segmented-data RDS is not a data frame.")
 }
 
-if (!is.list(selected_configuration)) {
-  stop("The selected-configuration object is not a list.")
+if (!is.data.frame(integrated_membership)) {
+  stop("The corrected 006 membership RDS is not a data frame.")
 }
 
-if (!is.data.frame(selected_membership)) {
-  stop("The selected-membership object is not a data frame.")
+if (!is.list(inference_status)) {
+  stop("The corrected 006 inference-status RDS is not a list.")
 }
 
 if (!is.data.frame(graph_summary) || nrow(graph_summary) != 1L) {
-  stop("The graph-summary object must be a one-row data frame.")
+  stop("The corrected 006 graph-summary RDS must be a one-row data frame.")
 }
 
-expected_k <- 56L
-expected_clusters <- 2L
-expected_fish <- 89L
-expected_sizes <- c(41L, 48L)
+if (!is.data.frame(results_by_k)) {
+  stop("The 006.0 optimisation-results RDS is not a data frame.")
+}
+
+if (!is.list(memberships_by_k)) {
+  stop("The 006.0 optimisation-memberships RDS is not a list.")
+}
+
+if (!is.data.frame(modularity_tests)) {
+  stop("The 006.1 modularity-test CSV is not a data frame.")
+}
+
+if (!is.data.frame(corrected_006_dependency_audit)) {
+  stop("The corrected 006 dependency audit is not a data frame.")
+}
+
+required_dependency_audit_columns <- c("Dependency", "File", "MD5", "Modified")
+missing_dependency_audit_columns <- setdiff(
+  required_dependency_audit_columns,
+  names(corrected_006_dependency_audit)
+)
+
+if (length(missing_dependency_audit_columns) > 0L) {
+  stop(
+    "The corrected 006 dependency audit lacks:\n",
+    paste(missing_dependency_audit_columns, collapse = ", ")
+  )
+}
+
+# Confirm by MD5, rather than modification time alone, that the direct
+# 006.0 and 006.1 files are exactly those consumed by corrected 006.
+
+audited_basenames <- basename(as.character(
+  corrected_006_dependency_audit$File
+))
+
+for (source_file_i in source_input_files) {
+  source_basename_i <- basename(source_file_i)
+  matching_audit_rows_i <- which(audited_basenames == source_basename_i)
+  
+  if (length(matching_audit_rows_i) != 1L) {
+    stop(
+      "The corrected 006 dependency audit does not contain exactly one row for ",
+      source_basename_i,
+      "."
+    )
+  }
+  
+  saved_md5_i <- tolower(trimws(as.character(
+    corrected_006_dependency_audit$MD5[matching_audit_rows_i]
+  )))
+  current_md5_i <- tolower(as.character(unname(
+    tools::md5sum(source_file_i)
+  )))
+  
+  if (
+    length(saved_md5_i) != 1L ||
+    !grepl("^[[:xdigit:]]{32}$", saved_md5_i) ||
+    !identical(saved_md5_i, current_md5_i)
+  ) {
+    stop(
+      source_basename_i,
+      " differs from the version consumed by corrected 006. ",
+      "Rerun corrected 006 before this script."
+    )
+  }
+}
+
+# ------------------------------------------------------------
+# 5. Validate the 006.1 inferential conclusion
+# ------------------------------------------------------------
+
+expected_k <- 45L
+expected_number_of_segments <- 2L
+expected_number_of_fish <- 89L
+expected_segment_sizes <- c(40L, 49L)
+expected_number_of_authors <- 4L
+primary_alpha <- 0.05
+
+required_status_elements <- c(
+  "Analysis",
+  "Selected_k",
+  "Number_of_algorithmic_segments",
+  "Segment_sizes",
+  "Observed_weighted_modularity",
+  "Primary_test",
+  "Primary_empirical_p",
+  "Alpha",
+  "Evidence_of_discrete_communities",
+  "Interpretation",
+  "Permitted_use",
+  "Prohibited_use"
+)
+
+missing_status_elements <- setdiff(
+  required_status_elements,
+  names(inference_status)
+)
+
+if (length(missing_status_elements) > 0L) {
+  stop(
+    "The corrected 006 inference-status RDS lacks:\n",
+    paste(missing_status_elements, collapse = ", ")
+  )
+}
+
+selected_k <- as.integer(inference_status$Selected_k)
+selected_number_of_segments <- as.integer(
+  inference_status$Number_of_algorithmic_segments
+)
+saved_segment_sizes <- sort(as.integer(unlist(
+  inference_status$Segment_sizes,
+  use.names = FALSE
+)))
+observed_weighted_modularity <- as.numeric(
+  inference_status$Observed_weighted_modularity
+)
+primary_empirical_p <- as.numeric(inference_status$Primary_empirical_p)
+saved_alpha <- as.numeric(inference_status$Alpha)
+evidence_of_discrete_communities <- as.logical(
+  inference_status$Evidence_of_discrete_communities
+)
+
+if (
+  length(selected_k) != 1L || is.na(selected_k) ||
+  selected_k != expected_k
+) {
+  stop("The corrected 006 inference status does not specify k = 45.")
+}
+
+if (
+  length(selected_number_of_segments) != 1L ||
+  is.na(selected_number_of_segments) ||
+  selected_number_of_segments != expected_number_of_segments
+) {
+  stop("The corrected 006 inference status does not specify two segments.")
+}
+
+if (!identical(saved_segment_sizes, expected_segment_sizes)) {
+  stop("The corrected 006 inference status does not contain segment sizes 40/49.")
+}
+
+if (
+  length(observed_weighted_modularity) != 1L ||
+  !is.finite(observed_weighted_modularity)
+) {
+  stop("The corrected 006 inference status contains invalid modularity.")
+}
+
+if (
+  length(primary_empirical_p) != 1L ||
+  !is.finite(primary_empirical_p) ||
+  primary_empirical_p < 0 ||
+  primary_empirical_p > 1
+) {
+  stop("The corrected 006 inference status contains an invalid primary p value.")
+}
+
+if (
+  length(saved_alpha) != 1L ||
+  !is.finite(saved_alpha) ||
+  !isTRUE(all.equal(saved_alpha, primary_alpha, tolerance = 1e-12))
+) {
+  stop("The corrected 006 inference status does not use alpha = 0.05.")
+}
+
+if (
+  length(evidence_of_discrete_communities) != 1L ||
+  is.na(evidence_of_discrete_communities)
+) {
+  stop("The discrete-community evidence flag is invalid.")
+}
+
+if (
+  evidence_of_discrete_communities ||
+  primary_empirical_p < primary_alpha
+) {
+  stop(
+    "The primary 006.1 conclusion now differs from the descriptive ",
+    "continuous-space interpretation encoded in this script. Review the ",
+    "workflow before producing segment summaries."
+  )
+}
+
+required_test_columns <- c(
+  "Test",
+  "Status",
+  "Observed_statistic",
+  "Empirical_p"
+)
+
+missing_test_columns <- setdiff(
+  required_test_columns,
+  names(modularity_tests)
+)
+
+if (length(missing_test_columns) > 0L) {
+  stop(
+    "The 006.1 modularity-test CSV lacks:\n",
+    paste(missing_test_columns, collapse = ", ")
+  )
+}
+
+primary_test <- modularity_tests[
+  modularity_tests$Status == "Primary inference",
+  ,
+  drop = FALSE
+]
+
+if (nrow(primary_test) != 1L) {
+  stop("Exactly one primary inference must be present in the 006.1 CSV.")
+}
+
+if (!isTRUE(all.equal(
+  as.numeric(primary_test$Empirical_p),
+  primary_empirical_p,
+  tolerance = 1e-12
+))) {
+  stop("The primary empirical p value differs between 006 and 006.1.")
+}
+
+if (!isTRUE(all.equal(
+  as.numeric(primary_test$Observed_statistic),
+  observed_weighted_modularity,
+  tolerance = 1e-10
+))) {
+  stop("The observed modularity differs between 006 and 006.1.")
+}
+
+if (!identical(
+  as.character(primary_test$Test),
+  as.character(inference_status$Primary_test)
+)) {
+  stop("The primary test identity differs between 006 and 006.1.")
+}
+
+# ------------------------------------------------------------
+# 6. Validate corrected 006 data and Author + ID traceability
+# ------------------------------------------------------------
 
 robust_variables <- c(
   "distance_rz",
@@ -127,180 +537,160 @@ robust_variables <- c(
   "top_time_rz"
 )
 
-required_configuration_fields <- c(
-  "Number_of_Clusters", "k", "Normalisation", "Distance",
-  "Similarity", "Graph", "Louvain_Seed"
+required_segmented_columns <- c(
+  "Author",
+  "ID",
+  "Traceability_ID",
+  "Algorithmic_Segment",
+  robust_variables
 )
 
-missing_configuration_fields <- setdiff(
-  required_configuration_fields,
-  names(selected_configuration)
+missing_segmented_columns <- setdiff(
+  required_segmented_columns,
+  names(control_segmented)
 )
 
-if (length(missing_configuration_fields) > 0L) {
+if (length(missing_segmented_columns) > 0L) {
   stop(
-    "The selected configuration is missing:\n",
-    paste(missing_configuration_fields, collapse = ", ")
+    "The corrected 006 segmented dataset lacks:\n",
+    paste(missing_segmented_columns, collapse = ", ")
   )
 }
 
-if (as.integer(selected_configuration$k) != expected_k) {
-  stop("The selected configuration does not specify k = 56.")
-}
-
-if (as.integer(selected_configuration$Number_of_Clusters) != expected_clusters) {
-  stop("The selected configuration does not specify two clusters.")
-}
-
-required_graph_columns <- c(
-  "Number_of_fish", "k", "Connected", "Number_of_clusters",
-  "Weighted_modularity"
+required_integrated_membership_columns <- c(
+  "Author",
+  "ID",
+  "Traceability_ID",
+  "Algorithmic_Segment"
 )
 
-missing_graph_columns <- setdiff(required_graph_columns, names(graph_summary))
+missing_integrated_membership_columns <- setdiff(
+  required_integrated_membership_columns,
+  names(integrated_membership)
+)
 
-if (length(missing_graph_columns) > 0L) {
+if (length(missing_integrated_membership_columns) > 0L) {
   stop(
-    "The graph summary is missing:\n",
-    paste(missing_graph_columns, collapse = ", ")
+    "The corrected 006 membership object lacks:\n",
+    paste(missing_integrated_membership_columns, collapse = ", ")
   )
 }
 
-if (
-  as.integer(graph_summary$Number_of_fish) != expected_fish ||
-  as.integer(graph_summary$k) != expected_k ||
-  as.integer(graph_summary$Number_of_clusters) != expected_clusters ||
-  !isTRUE(graph_summary$Connected)
-) {
-  stop("The graph summary is inconsistent with the final k = 56 solution.")
+make_traceability_key <- function(author, id) {
+  paste(trimws(as.character(author)), trimws(as.character(id)), sep = " || ")
 }
 
-if (!is.finite(graph_summary$Weighted_modularity)) {
-  stop("The weighted modularity is not finite.")
-}
-
-# ------------------------------------------------------------
-# 4. Validate and align memberships
-# ------------------------------------------------------------
-
-required_louvain_columns <- c("ID", "Cluster", robust_variables)
-missing_louvain_columns <- setdiff(
-  required_louvain_columns,
-  names(control_louvain)
-)
-
-if (length(missing_louvain_columns) > 0L) {
-  stop(
-    "The Louvain dataset is missing:\n",
-    paste(missing_louvain_columns, collapse = ", ")
+normalise_segment_label <- function(x, object_name) {
+  label <- trimws(as.character(x))
+  segment_number <- suppressWarnings(
+    as.integer(sub("^Segment[[:space:]]+", "", label))
   )
-}
-
-required_membership_columns <- c("ID", "k", "Number_of_Clusters", "Cluster")
-missing_membership_columns <- setdiff(
-  required_membership_columns,
-  names(selected_membership)
-)
-
-if (length(missing_membership_columns) > 0L) {
-  stop(
-    "The selected-membership object is missing:\n",
-    paste(missing_membership_columns, collapse = ", ")
-  )
-}
-
-cluster_to_integer <- function(x, object_name) {
-  if (is.factor(x)) {
-    x <- as.character(x)
+  
+  if (
+    anyNA(segment_number) ||
+    any(!label %in% paste("Segment", seq_len(expected_number_of_segments)))
+  ) {
+    stop("Invalid algorithmic-segment labels were detected in ", object_name, ".")
   }
   
-  result <- suppressWarnings(as.integer(x))
-  
-  if (anyNA(result)) {
-    stop("Invalid cluster labels were detected in ", object_name, ".")
-  }
-  
-  result
+  factor(
+    paste("Segment", segment_number),
+    levels = paste("Segment", seq_len(expected_number_of_segments))
+  )
 }
 
-control_louvain <- control_louvain %>%
+control_segmented <- control_segmented %>%
   dplyr::mutate(
-    ID = as.character(ID),
-    Cluster_integer = cluster_to_integer(Cluster, "control_louvain")
+    Author = trimws(as.character(Author)),
+    ID = trimws(as.character(ID)),
+    Traceability_ID = trimws(as.character(Traceability_ID)),
+    Algorithmic_Segment = normalise_segment_label(
+      Algorithmic_Segment,
+      "control_segmented"
+    )
   )
 
-selected_membership <- selected_membership %>%
+integrated_membership <- integrated_membership %>%
   dplyr::transmute(
-    ID = as.character(ID),
-    k = as.integer(k),
-    Number_of_Clusters = as.integer(Number_of_Clusters),
-    Cluster_integer = cluster_to_integer(Cluster, "selected_membership")
+    Author = trimws(as.character(Author)),
+    ID = trimws(as.character(ID)),
+    Traceability_ID = trimws(as.character(Traceability_ID)),
+    Algorithmic_Segment = normalise_segment_label(
+      Algorithmic_Segment,
+      "integrated_membership"
+    )
   )
 
-if (
-  anyNA(control_louvain$ID) || any(control_louvain$ID == "") ||
-  anyDuplicated(control_louvain$ID) > 0L
-) {
-  stop("Missing, empty, or duplicated IDs were detected in control_louvain.")
+for (data_name_i in c("control_segmented", "integrated_membership")) {
+  data_i <- get(data_name_i)
+  
+  if (
+    anyNA(data_i[c("Author", "ID", "Traceability_ID")]) ||
+    any(data_i$Author == "") ||
+    any(data_i$ID == "") ||
+    any(data_i$Traceability_ID == "")
+  ) {
+    stop("Missing or empty traceability values were detected in ", data_name_i, ".")
+  }
+  
+  expected_keys_i <- make_traceability_key(data_i$Author, data_i$ID)
+  
+  if (!identical(data_i$Traceability_ID, expected_keys_i)) {
+    stop("Stored Author + ID keys are invalid in ", data_name_i, ".")
+  }
+  
+  if (
+    anyDuplicated(data_i[c("Author", "ID")]) > 0L ||
+    anyDuplicated(data_i$Traceability_ID) > 0L
+  ) {
+    stop("Duplicated Author + ID keys were detected in ", data_name_i, ".")
+  }
 }
 
-if (
-  anyNA(selected_membership$ID) || any(selected_membership$ID == "") ||
-  anyDuplicated(selected_membership$ID) > 0L
-) {
-  stop("Missing, empty, or duplicated IDs were detected in selected_membership.")
+if (nrow(control_segmented) != expected_number_of_fish) {
+  stop("The corrected 006 segmented dataset does not contain 89 fish.")
 }
 
-if (!setequal(control_louvain$ID, selected_membership$ID)) {
-  stop("Fish IDs differ between the two upstream objects.")
+if (nrow(integrated_membership) != expected_number_of_fish) {
+  stop("The corrected 006 membership object does not contain 89 fish.")
 }
 
-selected_membership <- selected_membership[
-  match(control_louvain$ID, selected_membership$ID),
+if (!setequal(
+  control_segmented$Traceability_ID,
+  integrated_membership$Traceability_ID
+)) {
+  stop("Author + ID keys differ between the corrected 006 data and membership.")
+}
+
+integrated_membership <- integrated_membership[
+  match(
+    control_segmented$Traceability_ID,
+    integrated_membership$Traceability_ID
+  ),
   ,
   drop = FALSE
 ]
 
-if (!identical(control_louvain$ID, selected_membership$ID)) {
-  stop("The selected membership could not be aligned by fish ID.")
-}
-
-if (
-  any(selected_membership$k != expected_k) ||
-  any(selected_membership$Number_of_Clusters != expected_clusters)
-) {
-  stop("The membership object is not the final k = 56, two-cluster solution.")
+if (!identical(
+  control_segmented$Traceability_ID,
+  integrated_membership$Traceability_ID
+)) {
+  stop("The corrected 006 membership could not be aligned by Author + ID.")
 }
 
 if (!identical(
-  control_louvain$Cluster_integer,
-  selected_membership$Cluster_integer
+  as.character(control_segmented$Algorithmic_Segment),
+  as.character(integrated_membership$Algorithmic_Segment)
 )) {
-  stop("Cluster assignments differ between the two upstream objects.")
+  stop("Segment assignments differ between the corrected 006 objects.")
 }
 
-cluster_levels <- sort(unique(control_louvain$Cluster_integer))
-
-if (!identical(cluster_levels, c(1L, 2L))) {
-  stop("The final cluster labels are not exactly 1 and 2.")
-}
-
-control_louvain <- control_louvain %>%
-  dplyr::mutate(
-    Cluster = factor(Cluster_integer, levels = cluster_levels)
-  ) %>%
-  dplyr::select(-Cluster_integer)
-
-# ------------------------------------------------------------
-# 5. Audit the final data and robust normalisation
-# ------------------------------------------------------------
-
-if (nrow(control_louvain) != expected_fish) {
-  stop("The final Louvain dataset does not contain 89 fish.")
+if (dplyr::n_distinct(control_segmented$Author) != expected_number_of_authors) {
+  stop("The corrected 006 dataset does not contain the expected four Authors.")
 }
 
 non_numeric_variables <- robust_variables[
-  !vapply(control_louvain[robust_variables], is.numeric, logical(1))
+  !vapply(control_segmented[robust_variables], is.numeric, logical(1))
 ]
 
 if (length(non_numeric_variables) > 0L) {
@@ -310,54 +700,245 @@ if (length(non_numeric_variables) > 0L) {
   )
 }
 
-robust_matrix <- as.matrix(control_louvain[robust_variables])
+robust_matrix <- as.matrix(control_segmented[robust_variables])
 storage.mode(robust_matrix) <- "double"
 
 if (any(!is.finite(robust_matrix))) {
   stop("Missing or non-finite robust behavioural values were detected.")
 }
 
-robust_audit <- tibble::tibble(
-  Variable = robust_variables,
-  n = nrow(control_louvain),
-  Median = vapply(
-    control_louvain[robust_variables],
-    stats::median,
-    numeric(1),
-    na.rm = TRUE
-  ),
-  Scaled_MAD = vapply(
-    control_louvain[robust_variables],
-    function(x) {
-      stats::mad(
-        x,
-        center = stats::median(x, na.rm = TRUE),
-        constant = 1.4826,
-        na.rm = TRUE
-      )
-    },
-    numeric(1)
-  )
-)
-
-if (
-  any(abs(robust_audit$Median) > 1e-6) ||
-  any(abs(robust_audit$Scaled_MAD - 1) > 1e-6)
-) {
-  stop("The robust-normalisation audit failed.")
-}
-
-cluster_sizes <- control_louvain %>%
-  dplyr::count(Cluster, name = "n") %>%
+segment_sizes <- control_segmented %>%
+  dplyr::count(Algorithmic_Segment, name = "n") %>%
   dplyr::mutate(Percentage = 100 * n / sum(n)) %>%
-  dplyr::arrange(Cluster)
+  dplyr::arrange(Algorithmic_Segment)
 
-if (!identical(sort(cluster_sizes$n), expected_sizes)) {
-  stop("The final clusters do not contain 41 and 48 fish.")
+if (!identical(sort(segment_sizes$n), expected_segment_sizes)) {
+  stop("The imported exploratory segmentation does not contain 40 and 49 fish.")
 }
 
 # ------------------------------------------------------------
-# 6. Prepare individual and summary profile tables
+# 7. Verify the imported membership directly against 006.0
+# ------------------------------------------------------------
+
+required_results_columns <- c("k", "Clusters")
+missing_results_columns <- setdiff(
+  required_results_columns,
+  names(results_by_k)
+)
+
+if (length(missing_results_columns) > 0L) {
+  stop(
+    "The 006.0 optimisation-results object lacks:\n",
+    paste(missing_results_columns, collapse = ", ")
+  )
+}
+
+selected_result_006_0 <- results_by_k[
+  as.integer(results_by_k$k) == selected_k,
+  ,
+  drop = FALSE
+]
+
+if (nrow(selected_result_006_0) != 1L) {
+  stop("The 006.0 results do not contain exactly one row for k = 45.")
+}
+
+if (
+  as.integer(selected_result_006_0$Clusters[[1]]) !=
+  selected_number_of_segments
+) {
+  stop("006.0 and corrected 006 disagree on the number of segments at k = 45.")
+}
+
+selected_membership_name <- paste0("k_", selected_k)
+
+if (!selected_membership_name %in% names(memberships_by_k)) {
+  stop("The 006.0 membership list lacks ", selected_membership_name, ".")
+}
+
+selected_membership_006_0 <- memberships_by_k[[selected_membership_name]]
+
+if (!is.data.frame(selected_membership_006_0)) {
+  stop("The 006.0 k = 45 membership is not a data frame.")
+}
+
+required_006_0_membership_columns <- c("k", "Author", "ID", "Cluster")
+missing_006_0_membership_columns <- setdiff(
+  required_006_0_membership_columns,
+  names(selected_membership_006_0)
+)
+
+if (length(missing_006_0_membership_columns) > 0L) {
+  stop(
+    "The 006.0 k = 45 membership lacks:\n",
+    paste(missing_006_0_membership_columns, collapse = ", ")
+  )
+}
+
+selected_membership_006_0 <- selected_membership_006_0 %>%
+  dplyr::transmute(
+    k = as.integer(k),
+    Author = trimws(as.character(Author)),
+    ID = trimws(as.character(ID)),
+    Traceability_ID = make_traceability_key(Author, ID),
+    Algorithmic_Segment = factor(
+      paste("Segment", as.integer(Cluster)),
+      levels = paste("Segment", seq_len(expected_number_of_segments))
+    )
+  )
+
+if (
+  anyNA(selected_membership_006_0) ||
+  any(selected_membership_006_0$k != selected_k) ||
+  anyDuplicated(selected_membership_006_0$Traceability_ID) > 0L
+) {
+  stop("The 006.0 k = 45 membership failed its integrity checks.")
+}
+
+if (!setequal(
+  selected_membership_006_0$Traceability_ID,
+  control_segmented$Traceability_ID
+)) {
+  stop("The 006.0 and corrected 006 Author + ID keys do not match.")
+}
+
+selected_membership_006_0 <- selected_membership_006_0[
+  match(
+    control_segmented$Traceability_ID,
+    selected_membership_006_0$Traceability_ID
+  ),
+  ,
+  drop = FALSE
+]
+
+if (!identical(
+  as.character(selected_membership_006_0$Algorithmic_Segment),
+  as.character(control_segmented$Algorithmic_Segment)
+)) {
+  stop("The imported corrected 006 segments differ from the 006.0 k = 45 membership.")
+}
+
+# ------------------------------------------------------------
+# 8. Verify graph and modularity status from corrected 006
+# ------------------------------------------------------------
+
+required_graph_columns <- c(
+  "Number_of_fish",
+  "Traceability_key",
+  "Selected_k",
+  "Number_of_algorithmic_segments",
+  "Weighted_modularity",
+  "Primary_empirical_p",
+  "Evidence_of_discrete_communities"
+)
+
+missing_graph_columns <- setdiff(
+  required_graph_columns,
+  names(graph_summary)
+)
+
+if (length(missing_graph_columns) > 0L) {
+  stop(
+    "The corrected 006 graph summary lacks:\n",
+    paste(missing_graph_columns, collapse = ", ")
+  )
+}
+
+if (
+  as.integer(graph_summary$Number_of_fish[[1]]) != expected_number_of_fish ||
+  as.character(graph_summary$Traceability_key[[1]]) != "Author + ID" ||
+  as.integer(graph_summary$Selected_k[[1]]) != selected_k ||
+  as.integer(graph_summary$Number_of_algorithmic_segments[[1]]) !=
+  selected_number_of_segments
+) {
+  stop("The corrected 006 graph summary has an unexpected configuration.")
+}
+
+if (!isTRUE(all.equal(
+  as.numeric(graph_summary$Weighted_modularity[[1]]),
+  observed_weighted_modularity,
+  tolerance = 1e-10
+))) {
+  stop("Weighted modularity differs between corrected 006 outputs.")
+}
+
+if (!isTRUE(all.equal(
+  as.numeric(graph_summary$Primary_empirical_p[[1]]),
+  primary_empirical_p,
+  tolerance = 1e-12
+))) {
+  stop("The primary empirical p value differs between corrected 006 outputs.")
+}
+
+graph_evidence_flag <- as.logical(
+  graph_summary$Evidence_of_discrete_communities[[1]]
+)
+
+if (
+  length(graph_evidence_flag) != 1L ||
+  is.na(graph_evidence_flag) ||
+  graph_evidence_flag
+) {
+  stop("The corrected 006 graph summary does not encode the non-significant conclusion.")
+}
+
+# ------------------------------------------------------------
+# 9. Audit robust normalisation separately within Author
+# ------------------------------------------------------------
+
+author_levels <- sort(unique(control_segmented$Author))
+
+robust_audit <- dplyr::bind_rows(lapply(
+  author_levels,
+  function(author_i) {
+    author_data_i <- control_segmented[
+      control_segmented$Author == author_i,
+      robust_variables,
+      drop = FALSE
+    ]
+    
+    dplyr::bind_rows(lapply(
+      robust_variables,
+      function(variable_i) {
+        values_i <- author_data_i[[variable_i]]
+        
+        tibble::tibble(
+          Author = author_i,
+          Variable = variable_i,
+          n = length(values_i),
+          Median = stats::median(values_i),
+          Scaled_MAD = stats::mad(
+            values_i,
+            center = stats::median(values_i),
+            constant = 1.4826
+          )
+        )
+      }
+    ))
+  }
+))
+
+if (
+  nrow(robust_audit) !=
+  expected_number_of_authors * length(robust_variables)
+) {
+  stop("The within-Author robust-normalisation audit has an unexpected size.")
+}
+
+if (any(!is.finite(as.matrix(robust_audit[c("Median", "Scaled_MAD")]))) ) {
+  stop("The within-Author robust-normalisation audit contains non-finite values.")
+}
+
+if (any(abs(robust_audit$Median) > 1e-6)) {
+  stop("At least one within-Author robust median differs from zero.")
+}
+
+if (any(abs(robust_audit$Scaled_MAD - 1) > 1e-6)) {
+  stop("At least one within-Author scaled MAD differs from one.")
+}
+
+# ------------------------------------------------------------
+# 10. Prepare descriptive individual and summary tables
 # ------------------------------------------------------------
 
 variable_keys <- c(
@@ -374,8 +955,14 @@ variable_labels <- c(
   top_time = "Upper-zone time"
 )
 
-profile_individual_long <- control_louvain %>%
-  dplyr::select(ID, Cluster, dplyr::all_of(robust_variables)) %>%
+individual_long <- control_segmented %>%
+  dplyr::select(
+    Author,
+    ID,
+    Traceability_ID,
+    Algorithmic_Segment,
+    dplyr::all_of(robust_variables)
+  ) %>%
   tidyr::pivot_longer(
     cols = dplyr::all_of(robust_variables),
     names_to = "Robust_Variable",
@@ -389,261 +976,746 @@ profile_individual_long <- control_louvain %>%
       ordered = TRUE
     )
   ) %>%
-  dplyr::arrange(Cluster, Variable, ID)
+  dplyr::arrange(
+    Algorithmic_Segment,
+    Author,
+    suppressWarnings(as.numeric(ID)),
+    ID,
+    Variable
+  )
 
 if (
-  anyNA(profile_individual_long$Variable_Key) ||
-  anyNA(profile_individual_long$Variable)
+  anyNA(individual_long$Variable_Key) ||
+  anyNA(individual_long$Variable)
 ) {
   stop("At least one behavioural variable could not be labelled.")
 }
 
-if (nrow(profile_individual_long) != expected_fish * length(robust_variables)) {
-  stop("The individual long-format profile table has an incorrect size.")
+if (
+  nrow(individual_long) !=
+  expected_number_of_fish * length(robust_variables)
+) {
+  stop("The descriptive individual table has an incorrect number of rows.")
 }
 
-cluster_profile_summary <- profile_individual_long %>%
-  dplyr::group_by(Cluster, Robust_Variable, Variable_Key, Variable) %>%
+descriptive_summary <- individual_long %>%
+  dplyr::group_by(
+    Algorithmic_Segment,
+    Robust_Variable,
+    Variable_Key,
+    Variable
+  ) %>%
   dplyr::summarise(
     n = dplyr::n(),
     Mean_Robust_Z_Score = mean(Robust_Z_Score),
     SD_Robust_Z_Score = stats::sd(Robust_Z_Score),
-    SE_Robust_Z_Score = SD_Robust_Z_Score / sqrt(n),
     Median_Robust_Z_Score = stats::median(Robust_Z_Score),
-    Q1_Robust_Z_Score = as.numeric(
-      stats::quantile(Robust_Z_Score, probs = 0.25, names = FALSE)
-    ),
-    Q3_Robust_Z_Score = as.numeric(
-      stats::quantile(Robust_Z_Score, probs = 0.75, names = FALSE)
-    ),
+    Q1_Robust_Z_Score = as.numeric(stats::quantile(
+      Robust_Z_Score,
+      probs = 0.25,
+      names = FALSE
+    )),
+    Q3_Robust_Z_Score = as.numeric(stats::quantile(
+      Robust_Z_Score,
+      probs = 0.75,
+      names = FALSE
+    )),
     IQR_Robust_Z_Score = stats::IQR(Robust_Z_Score),
     Minimum_Robust_Z_Score = min(Robust_Z_Score),
     Maximum_Robust_Z_Score = max(Robust_Z_Score),
     .groups = "drop"
   ) %>%
-  dplyr::arrange(Cluster, Variable)
+  dplyr::arrange(Algorithmic_Segment, Variable)
 
-if (nrow(cluster_profile_summary) != expected_clusters * length(robust_variables)) {
-  stop("The cluster-profile summary has an incorrect number of rows.")
+if (
+  nrow(descriptive_summary) !=
+  expected_number_of_segments * length(robust_variables)
+) {
+  stop("The descriptive segment summary has an incorrect number of rows.")
 }
 
-summary_columns <- c(
-  "Mean_Robust_Z_Score", "SD_Robust_Z_Score", "SE_Robust_Z_Score",
-  "Median_Robust_Z_Score", "Q1_Robust_Z_Score", "Q3_Robust_Z_Score",
-  "IQR_Robust_Z_Score", "Minimum_Robust_Z_Score",
+descriptive_columns <- c(
+  "Mean_Robust_Z_Score",
+  "SD_Robust_Z_Score",
+  "Median_Robust_Z_Score",
+  "Q1_Robust_Z_Score",
+  "Q3_Robust_Z_Score",
+  "IQR_Robust_Z_Score",
+  "Minimum_Robust_Z_Score",
   "Maximum_Robust_Z_Score"
 )
 
-if (any(!is.finite(as.matrix(cluster_profile_summary[summary_columns])))) {
-  stop("At least one cluster-profile statistic is not finite.")
+if (any(!is.finite(as.matrix(descriptive_summary[descriptive_columns])))) {
+  stop("At least one descriptive segment statistic is not finite.")
 }
 
-# Preserve the structures and object names used by the original script.
-cluster_profile_long <- cluster_profile_summary %>%
+mean_summary_wide <- descriptive_summary %>%
   dplyr::select(
-    Cluster, n, Variable_Key, Variable, Mean_Robust_Z_Score
-  )
-
-cluster_profile_wide <- control_louvain %>%
-  dplyr::group_by(Cluster) %>%
-  dplyr::summarise(
-    n = dplyr::n(),
-    distance = mean(distance_rz),
-    crossing = mean(crossing_rz),
-    top_entry = mean(top_entry_rz),
-    top_time = mean(top_time_rz),
-    .groups = "drop"
+    Algorithmic_Segment,
+    n,
+    Variable_Key,
+    Mean_Robust_Z_Score
   ) %>%
-  dplyr::arrange(Cluster)
+  tidyr::pivot_wider(
+    names_from = Variable_Key,
+    values_from = Mean_Robust_Z_Score
+  ) %>%
+  dplyr::arrange(Algorithmic_Segment)
 
 # ------------------------------------------------------------
-# 7. Generate Figure 5
+# 11. Generate the descriptive supplementary figure
 # ------------------------------------------------------------
+
+segment_levels <- levels(control_segmented$Algorithmic_Segment)
+
+segment_palette <- stats::setNames(
+  c("#63B8A6", "#F07A5A"),
+  segment_levels
+)
 
 legend_labels <- stats::setNames(
   paste0(
-    "Cluster ", as.character(cluster_sizes$Cluster),
-    " (n = ", cluster_sizes$n, ")"
+    segment_levels,
+    " (n = ",
+    segment_sizes$n[
+      match(
+        segment_levels,
+        as.character(segment_sizes$Algorithmic_Segment)
+      )
+    ],
+    ")"
   ),
-  as.character(cluster_sizes$Cluster)
+  segment_levels
 )
 
-figure_5 <- ggplot2::ggplot(
-  cluster_profile_long,
+plot_summary <- descriptive_summary %>%
+  dplyr::mutate(
+    Algorithmic_Segment = factor(
+      as.character(Algorithmic_Segment),
+      levels = segment_levels
+    ),
+    Variable = factor(
+      as.character(Variable),
+      levels = unname(variable_labels),
+      ordered = TRUE
+    )
+  )
+
+figure_s <- ggplot2::ggplot(
+  plot_summary,
   ggplot2::aes(
     x = Variable,
     y = Mean_Robust_Z_Score,
-    group = Cluster,
-    colour = Cluster
+    group = Algorithmic_Segment,
+    colour = Algorithmic_Segment
   )
 ) +
   ggplot2::geom_hline(
     yintercept = 0,
-    linewidth = 0.5,
+    linewidth = 0.55,
     linetype = "dashed",
-    colour = "grey50"
+    colour = "grey45"
   ) +
-  ggplot2::geom_line(linewidth = 1.15) +
-  ggplot2::geom_point(size = 3) +
-  ggplot2::scale_colour_discrete(labels = legend_labels) +
+  ggplot2::geom_line(
+    linewidth = 1.1
+  ) +
+  ggplot2::geom_point(
+    size = 3
+  ) +
+  ggplot2::scale_colour_manual(
+    values = segment_palette,
+    breaks = segment_levels,
+    labels = legend_labels,
+    drop = FALSE
+  ) +
   ggplot2::labs(
     x = NULL,
     y = "Mean robust z-score",
-    colour = "Cluster"
+    colour = "Exploratory segment",
+    caption = paste0(
+      "Descriptive summary only. The same four variables were used to ",
+      "construct and describe the partition; no between-segment inference ",
+      "is performed. Selection-adjusted modularity p = ",
+      formatC(
+        primary_empirical_p,
+        format = "f",
+        digits = 3
+      ),
+      "."
+    )
   ) +
-  ggplot2::theme_classic(base_size = 14) +
+  ggplot2::theme_classic(
+    base_size = 14
+  ) +
   ggplot2::theme(
     panel.border = ggplot2::element_rect(
       colour = "black",
       fill = NA,
       linewidth = 0.8
     ),
+    axis.text = ggplot2::element_text(
+      colour = "black"
+    ),
     axis.text.x = ggplot2::element_text(
-      colour = "black",
       angle = 20,
       hjust = 1
     ),
-    axis.text.y = ggplot2::element_text(colour = "black"),
-    axis.title = ggplot2::element_text(face = "bold"),
-    legend.position = "right"
+    axis.title = ggplot2::element_text(
+      face = "bold"
+    ),
+    legend.position = "right",
+    plot.caption = ggplot2::element_text(
+      size = 9,
+      hjust = 0
+    )
   )
 
-print(figure_5)
+print(figure_s)
 
 # ------------------------------------------------------------
-# 8. Export figure, tables, and R objects
+# 12. Record the analytical configuration
 # ------------------------------------------------------------
 
-pdf_output <- file.path(figures_dir, "Figure5_ClusterProfiles.pdf")
-tiff_output <- file.path(figures_dir, "Figure5_ClusterProfiles.tiff")
+configuration_007 <- tibble::tibble(
+  Analysis_status = "Supplementary descriptive characterisation only",
+  Number_of_control_fish = expected_number_of_fish,
+  Number_of_authors = expected_number_of_authors,
+  Traceability_key = "Author + ID",
+  Selected_k = selected_k,
+  Number_of_algorithmic_segments = selected_number_of_segments,
+  Segment_sizes = paste(expected_segment_sizes, collapse = "/"),
+  Observed_weighted_modularity = observed_weighted_modularity,
+  Primary_test = as.character(inference_status$Primary_test),
+  Primary_selection_adjusted_empirical_p = primary_empirical_p,
+  Alpha = primary_alpha,
+  Evidence_of_discrete_communities = FALSE,
+  Variables_used_to_construct_partition = paste(
+    robust_variables,
+    collapse = ";"
+  ),
+  Same_variables_described_in_figure = TRUE,
+  Inferential_comparisons_between_segments = FALSE,
+  Error_bars_or_confidence_intervals = FALSE,
+  Biological_labels_assigned = FALSE,
+  Classification_object_created = FALSE,
+  Interpretation = as.character(inference_status$Interpretation)
+)
 
-wide_output <- file.path(tables_dir, "Figure5_ClusterProfiles_Wide.csv")
-long_output <- file.path(tables_dir, "Figure5_ClusterProfiles_Long.csv")
-summary_output <- file.path(tables_dir, "Figure5_ClusterProfiles_Summary.csv")
-individual_output <- file.path(
-  tables_dir,
-  "Figure5_ClusterProfiles_IndividualLong.csv"
-)
-cluster_size_output <- file.path(tables_dir, "Figure5_ClusterSizes.csv")
-configuration_output <- file.path(
-  tables_dir,
-  "Figure5_ClusterProfiles_Configuration.csv"
+# ------------------------------------------------------------
+# 13. Output paths
+# ------------------------------------------------------------
+
+pdf_output <- file.path(
+  figures_dir,
+  "FigureS_ExploratorySegmentSummaries.pdf"
 )
 
-figure_configuration <- tibble::tibble(
-  Number_of_control_fish = expected_fish,
-  k = expected_k,
-  Number_of_clusters = expected_clusters,
-  Cluster_1_n = cluster_sizes$n[as.character(cluster_sizes$Cluster) == "1"],
-  Cluster_2_n = cluster_sizes$n[as.character(cluster_sizes$Cluster) == "2"],
-  Normalisation = "(x - median) / (1.4826 x raw MAD)",
-  Profile_statistic = "Arithmetic mean of robust z-scores",
-  Weighted_modularity = as.numeric(graph_summary$Weighted_modularity)
+tiff_output <- file.path(
+  figures_dir,
+  "FigureS_ExploratorySegmentSummaries.tiff"
 )
+
+summary_csv <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentSummaries.csv"
+)
+
+individual_csv <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentSummaries_Individual.csv"
+)
+
+mean_wide_csv <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentSummaries_MeanWide.csv"
+)
+
+segment_sizes_csv <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentSummaries_Sizes.csv"
+)
+
+robust_audit_csv <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentSummaries_RobustAudit.csv"
+)
+
+configuration_csv <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentSummaries_Configuration.csv"
+)
+
+dependency_audit_csv <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentSummaries_DependencyAudit.csv"
+)
+
+summary_rds <- file.path(
+  objects_dir,
+  "objective1_louvain_exploratory_segment_summaries.rds"
+)
+
+individual_rds <- file.path(
+  objects_dir,
+  "objective1_louvain_exploratory_segment_summaries_individual.rds"
+)
+
+configuration_rds <- file.path(
+  objects_dir,
+  "objective1_louvain_exploratory_segment_summaries_configuration.rds"
+)
+
+figure_rds <- file.path(
+  objects_dir,
+  "objective1_figureS_exploratory_segment_summaries.rds"
+)
+
+session_info_file <- file.path(
+  objects_dir,
+  "objective1_exploratory_segment_summaries_sessionInfo.txt"
+)
+
+# ------------------------------------------------------------
+# 14. Export descriptive figure and tables
+# ------------------------------------------------------------
 
 ggplot2::ggsave(
   filename = pdf_output,
-  plot = figure_5,
+  plot = figure_s,
   width = 8,
-  height = 5.5,
+  height = 6,
   units = "in"
 )
 
 ggplot2::ggsave(
   filename = tiff_output,
-  plot = figure_5,
+  plot = figure_s,
   width = 8,
-  height = 5.5,
+  height = 6,
   units = "in",
   dpi = 600,
   compression = "lzw"
 )
 
-utils::write.csv(cluster_profile_wide, wide_output, row.names = FALSE)
-utils::write.csv(cluster_profile_long, long_output, row.names = FALSE)
-utils::write.csv(cluster_profile_summary, summary_output, row.names = FALSE)
-utils::write.csv(profile_individual_long, individual_output, row.names = FALSE)
-utils::write.csv(cluster_sizes, cluster_size_output, row.names = FALSE)
-utils::write.csv(figure_configuration, configuration_output, row.names = FALSE)
-
-wide_rds <- file.path(
-  objects_dir,
-  "objective1_louvain_cluster_profiles_wide_robust.rds"
-)
-long_rds <- file.path(
-  objects_dir,
-  "objective1_louvain_cluster_profiles_long_robust.rds"
-)
-summary_rds <- file.path(
-  objects_dir,
-  "objective1_louvain_cluster_profiles_summary_robust.rds"
-)
-individual_rds <- file.path(
-  objects_dir,
-  "objective1_louvain_cluster_profiles_individual_robust.rds"
-)
-figure_rds <- file.path(
-  objects_dir,
-  "objective1_figure5_cluster_profiles_robust.rds"
-)
-session_info_file <- file.path(
-  objects_dir,
-  "objective1_figure5_cluster_profiles_sessionInfo.txt"
+utils::write.csv(
+  descriptive_summary,
+  summary_csv,
+  row.names = FALSE
 )
 
-saveRDS(cluster_profile_wide, wide_rds)
-saveRDS(cluster_profile_long, long_rds)
-saveRDS(cluster_profile_summary, summary_rds)
-saveRDS(profile_individual_long, individual_rds)
-saveRDS(figure_5, figure_rds)
-capture.output(utils::sessionInfo(), file = session_info_file)
-
-expected_output_files <- c(
-  pdf_output, tiff_output, wide_output, long_output, summary_output,
-  individual_output, cluster_size_output, configuration_output,
-  wide_rds, long_rds, summary_rds, individual_rds, figure_rds,
-  session_info_file
+utils::write.csv(
+  individual_long,
+  individual_csv,
+  row.names = FALSE
 )
 
-missing_output_files <- expected_output_files[!file.exists(expected_output_files)]
+utils::write.csv(
+  mean_summary_wide,
+  mean_wide_csv,
+  row.names = FALSE
+)
 
-if (length(missing_output_files) > 0L) {
+utils::write.csv(
+  segment_sizes,
+  segment_sizes_csv,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  robust_audit,
+  robust_audit_csv,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  configuration_007,
+  configuration_csv,
+  row.names = FALSE
+)
+
+# ------------------------------------------------------------
+# 15. Dependency audit
+# ------------------------------------------------------------
+
+source_files_consumed_by_007 <- c(
+  segmented_data_file,
+  integrated_membership_file,
+  inference_status_file,
+  graph_summary_file,
+  corrected_006_dependency_audit_file,
+  optimisation_results_file,
+  optimisation_memberships_file,
+  modularity_null_results_file,
+  modularity_tests_csv_file
+)
+
+dependency_labels <- c(
+  "Corrected 006 segmented data",
+  "Corrected 006 integrated membership",
+  "Corrected 006 inference status",
+  "Corrected 006 graph summary",
+  "Corrected 006 dependency audit",
+  "006.0 optimisation results",
+  "006.0 optimisation memberships",
+  "006.1 complete null-model results",
+  "006.1 modularity-test CSV"
+)
+
+if (
+  length(source_files_consumed_by_007) !=
+  length(dependency_labels)
+) {
+  stop("The 007 dependency labels do not match the dependency files.")
+}
+
+dependency_audit_007 <- tibble::tibble(
+  Dependency = dependency_labels,
+  File = source_files_consumed_by_007,
+  MD5 = tolower(
+    as.character(
+      unname(
+        tools::md5sum(
+          source_files_consumed_by_007
+        )
+      )
+    )
+  ),
+  Modified = as.character(
+    file.info(
+      source_files_consumed_by_007
+    )$mtime
+  )
+)
+
+if (
+  anyNA(dependency_audit_007) ||
+  any(dependency_audit_007$Dependency == "") ||
+  any(dependency_audit_007$File == "") ||
+  any(!grepl(
+    "^[[:xdigit:]]{32}$",
+    dependency_audit_007$MD5
+  ))
+) {
+  stop("The 007 dependency audit contains invalid entries.")
+}
+
+if (
+  anyDuplicated(
+    basename(
+      dependency_audit_007$File
+    )
+  ) > 0L
+) {
   stop(
-    "The following expected output files were not created:\n",
-    paste(missing_output_files, collapse = "\n")
+    "The 007 dependency audit contains duplicated dependency basenames."
   )
 }
 
+utils::write.csv(
+  dependency_audit_007,
+  dependency_audit_csv,
+  row.names = FALSE
+)
+
 # ------------------------------------------------------------
-# 9. Final console audit
+# 16. Save RDS outputs after the dependency audit
 # ------------------------------------------------------------
 
-cat("\n============================================================\n")
-cat("FIGURE 5 - FINAL LOUVAIN CLUSTER PROFILES\n")
-cat("============================================================\n")
-cat("\nNumber of control fish: ", nrow(control_louvain), "\n", sep = "")
-cat("Selected k: ", expected_k, "\n", sep = "")
-cat("Number of clusters: ", expected_clusters, "\n", sep = "")
+saveRDS(
+  descriptive_summary,
+  summary_rds
+)
 
-cat("\nRobust-normalisation audit:\n")
-print(robust_audit, n = Inf, width = Inf)
+saveRDS(
+  individual_long,
+  individual_rds
+)
 
-cat("\nCluster sizes:\n")
-print(cluster_sizes, n = Inf, width = Inf)
+saveRDS(
+  configuration_007,
+  configuration_rds
+)
 
-cat("\nMean robust behavioural profiles:\n")
-print(cluster_profile_wide, n = Inf, width = Inf)
+saveRDS(
+  figure_s,
+  figure_rds
+)
 
-cat("\nDetailed cluster-profile summary:\n")
-print(cluster_profile_summary, n = Inf, width = Inf)
+capture.output(
+  utils::sessionInfo(),
+  file = session_info_file
+)
+
+# ------------------------------------------------------------
+# 17. Final compatibility and output audit
+# ------------------------------------------------------------
+
+required_008_files <- c(
+  summary_rds,
+  individual_rds,
+  configuration_rds,
+  segment_sizes_csv,
+  robust_audit_csv,
+  dependency_audit_csv
+)
+
+expected_output_files <- c(
+  pdf_output,
+  tiff_output,
+  summary_csv,
+  individual_csv,
+  mean_wide_csv,
+  segment_sizes_csv,
+  robust_audit_csv,
+  configuration_csv,
+  dependency_audit_csv,
+  summary_rds,
+  individual_rds,
+  configuration_rds,
+  figure_rds,
+  session_info_file
+)
+
+missing_output_files <- expected_output_files[
+  !file.exists(
+    expected_output_files
+  )
+]
+
+if (
+  length(missing_output_files) > 0L
+) {
+  stop(
+    "The following expected 007 output files were not created:\n",
+    paste(
+      missing_output_files,
+      collapse = "\n"
+    )
+  )
+}
+
+output_information <- file.info(
+  expected_output_files
+)
+
+if (
+  any(is.na(output_information$size)) ||
+  any(output_information$size <= 0)
+) {
+  stop(
+    "At least one 007 output file is empty or inaccessible."
+  )
+}
+
+required_008_information <- file.info(
+  required_008_files
+)
+
+if (
+  min(
+    required_008_information[
+      c(
+        summary_rds,
+        individual_rds,
+        configuration_rds
+      ),
+      "mtime"
+    ]
+  ) <
+  required_008_information[
+    dependency_audit_csv,
+    "mtime"
+  ]
+) {
+  stop(
+    "At least one 007 RDS object predates the 007 dependency audit."
+  )
+}
+
+if (
+  !identical(
+    names(configuration_007),
+    c(
+      "Analysis_status",
+      "Number_of_control_fish",
+      "Number_of_authors",
+      "Traceability_key",
+      "Selected_k",
+      "Number_of_algorithmic_segments",
+      "Segment_sizes",
+      "Observed_weighted_modularity",
+      "Primary_test",
+      "Primary_selection_adjusted_empirical_p",
+      "Alpha",
+      "Evidence_of_discrete_communities",
+      "Variables_used_to_construct_partition",
+      "Same_variables_described_in_figure",
+      "Inferential_comparisons_between_segments",
+      "Error_bars_or_confidence_intervals",
+      "Biological_labels_assigned",
+      "Classification_object_created",
+      "Interpretation"
+    )
+  )
+) {
+  stop(
+    "The 007 configuration object has an unexpected structure."
+  )
+}
+
+if (
+  as.character(configuration_007$Analysis_status[[1]]) !=
+  "Supplementary descriptive characterisation only" ||
+  as.integer(configuration_007$Number_of_control_fish[[1]]) !=
+  expected_number_of_fish ||
+  as.character(configuration_007$Traceability_key[[1]]) !=
+  "Author + ID" ||
+  as.integer(configuration_007$Selected_k[[1]]) !=
+  expected_k ||
+  as.integer(configuration_007$Number_of_algorithmic_segments[[1]]) !=
+  expected_number_of_segments ||
+  as.character(configuration_007$Segment_sizes[[1]]) !=
+  paste(expected_segment_sizes, collapse = "/") ||
+  isTRUE(
+    as.logical(
+      configuration_007$Evidence_of_discrete_communities[[1]]
+    )
+  ) ||
+  !isTRUE(
+    as.logical(
+      configuration_007$Same_variables_described_in_figure[[1]]
+    )
+  ) ||
+  isTRUE(
+    as.logical(
+      configuration_007$Inferential_comparisons_between_segments[[1]]
+    )
+  ) ||
+  isTRUE(
+    as.logical(
+      configuration_007$Error_bars_or_confidence_intervals[[1]]
+    )
+  )
+) {
+  stop(
+    "The 007 configuration is incompatible with the corrected descriptive workflow."
+  )
+}
 
 cat(
-  "\nFigure saved as:\n",
-  normalizePath(pdf_output, winslash = "/", mustWork = FALSE),
-  "\n",
-  normalizePath(tiff_output, winslash = "/", mustWork = FALSE),
+  "\n============================================================\n"
+)
+
+cat(
+  "007 — EXPLORATORY LOUVAIN SEGMENT SUMMARIES\n"
+)
+
+cat(
+  "============================================================\n"
+)
+
+cat(
+  "\nProject root:\n",
+  base_dir,
   "\n",
   sep = ""
 )
 
-cat("\n============================================================\n")
+cat(
+  "\nSelected k: ",
+  selected_k,
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Algorithmic segments: ",
+  selected_number_of_segments,
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Segment sizes: ",
+  paste(
+    sort(
+      segment_sizes$n
+    ),
+    collapse = "/"
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Observed weighted modularity: ",
+  formatC(
+    observed_weighted_modularity,
+    format = "f",
+    digits = 6
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Primary selection-adjusted empirical p: ",
+  formatC(
+    primary_empirical_p,
+    format = "f",
+    digits = 6
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nInterpretation:\n",
+  as.character(
+    inference_status$Interpretation
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nSegment sizes:\n"
+)
+
+print(
+  segment_sizes,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nDescriptive segment summaries:\n"
+)
+
+print(
+  descriptive_summary,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nFiles required by 008_TableS_ExploratorySegmentSummaries.R:\n",
+  paste(
+    normalizePath(
+      required_008_files,
+      winslash = "/",
+      mustWork = TRUE
+    ),
+    collapse = "\n"
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nAll 007 integrity and compatibility checks passed.\n"
+)
+
+cat(
+  "============================================================\n"
+)
