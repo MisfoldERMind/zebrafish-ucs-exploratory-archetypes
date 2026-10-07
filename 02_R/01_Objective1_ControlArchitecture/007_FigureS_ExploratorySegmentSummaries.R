@@ -32,7 +32,6 @@
 # ------------------------------------------------------------
 # 1. Project and packages
 # ------------------------------------------------------------
-
 base_dir <- normalizePath(
   Sys.getenv(
     "LAPCOM_UCS_PROJECT_ROOT",
@@ -47,6 +46,7 @@ if (!dir.exists(base_dir)) {
 }
 
 setwd(base_dir)
+
 
 required_packages <- c("dplyr", "tidyr", "tibble", "ggplot2")
 
@@ -1005,3 +1005,392 @@ segment_palette <- stats::setNames(
 )
 
 legend_labels <- stats::setNames(
+  paste0(
+    segment_sizes$Algorithmic_Segment,
+    " (n = ",
+    segment_sizes$n,
+    ")"
+  ),
+  as.character(segment_sizes$Algorithmic_Segment)
+)
+
+figure_caption <- paste(
+  base::strwrap(
+    paste0(
+      "Descriptive summary of the algorithmic partition only; individual ",
+      "traces show within-segment variation. The same variables constructed ",
+      "the partition, and no inferential comparison was performed ",
+      "(selection-adjusted p = ",
+      formatC(primary_empirical_p, format = "f", digits = 3),
+      ")."
+    ),
+    width = 105
+  ),
+  collapse = "\n"
+)
+
+figure_segment_summaries <- ggplot2::ggplot(
+  individual_long,
+  ggplot2::aes(
+    x = Variable,
+    y = Robust_Z_Score,
+    group = Traceability_ID,
+    colour = Algorithmic_Segment
+  )
+) +
+  ggplot2::geom_hline(
+    yintercept = 0,
+    linewidth = 0.5,
+    linetype = "dashed",
+    colour = "grey50"
+  ) +
+  ggplot2::geom_line(
+    linewidth = 0.35,
+    alpha = 0.13,
+    show.legend = FALSE
+  ) +
+  ggplot2::geom_point(
+    size = 0.8,
+    alpha = 0.16,
+    show.legend = FALSE
+  ) +
+  ggplot2::geom_line(
+    data = descriptive_summary,
+    ggplot2::aes(
+      x = Variable,
+      y = Mean_Robust_Z_Score,
+      group = Algorithmic_Segment,
+      colour = Algorithmic_Segment
+    ),
+    inherit.aes = FALSE,
+    linewidth = 1.25
+  ) +
+  ggplot2::geom_point(
+    data = descriptive_summary,
+    ggplot2::aes(
+      x = Variable,
+      y = Mean_Robust_Z_Score,
+      colour = Algorithmic_Segment
+    ),
+    inherit.aes = FALSE,
+    size = 3
+  ) +
+  ggplot2::scale_colour_manual(
+    values = segment_palette,
+    breaks = segment_levels,
+    labels = legend_labels,
+    drop = FALSE
+  ) +
+  ggplot2::labs(
+    x = NULL,
+    y = "Within-Author robust z-score",
+    colour = "Exploratory segment",
+    caption = figure_caption
+  ) +
+  ggplot2::theme_classic(base_size = 14) +
+  ggplot2::theme(
+    panel.border = ggplot2::element_rect(
+      colour = "black",
+      fill = NA,
+      linewidth = 0.8
+    ),
+    axis.text.x = ggplot2::element_text(
+      colour = "black",
+      angle = 20,
+      hjust = 1
+    ),
+    axis.text.y = ggplot2::element_text(colour = "black"),
+    axis.title = ggplot2::element_text(face = "bold"),
+    legend.position = "right",
+    plot.caption = ggplot2::element_text(
+      colour = "grey25",
+      size = 9,
+      hjust = 0,
+      margin = ggplot2::margin(t = 8)
+    )
+  )
+
+print(figure_segment_summaries)
+
+# ------------------------------------------------------------
+# 12. Define explicitly descriptive outputs
+# ------------------------------------------------------------
+
+pdf_output <- file.path(
+  figures_dir,
+  "FigureS_Louvain_ExploratorySegmentSummaries.pdf"
+)
+
+tiff_output <- file.path(
+  figures_dir,
+  "FigureS_Louvain_ExploratorySegmentSummaries.tiff"
+)
+
+summary_output <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentSummaries.csv"
+)
+
+individual_output <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentSummaries_IndividualLong.csv"
+)
+
+mean_wide_output <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentSummaries_MeanWide.csv"
+)
+
+segment_size_output <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentSummaries_Sizes.csv"
+)
+
+robust_audit_output <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentSummaries_RobustAudit.csv"
+)
+
+configuration_output <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentSummaries_Configuration.csv"
+)
+
+dependency_audit_output <- file.path(
+  tables_dir,
+  "Objective1_Louvain_ExploratorySegmentSummaries_DependencyAudit.csv"
+)
+
+figure_configuration <- tibble::tibble(
+  Analysis_status = "Supplementary descriptive characterisation only",
+  Number_of_control_fish = expected_number_of_fish,
+  Traceability_key = "Author + ID",
+  Normalisation = "Within Author: (x - median) / (1.4826 x raw MAD)",
+  Selected_k = selected_k,
+  Number_of_algorithmic_segments = selected_number_of_segments,
+  Segment_sizes = paste(expected_segment_sizes, collapse = "/"),
+  Observed_weighted_modularity = observed_weighted_modularity,
+  Primary_selection_adjusted_empirical_p = primary_empirical_p,
+  Alpha = primary_alpha,
+  Evidence_of_discrete_communities = FALSE,
+  Variables_used_to_construct_partition = paste(
+    robust_variables,
+    collapse = "; "
+  ),
+  Same_variables_described_in_figure = TRUE,
+  Inferential_comparisons_between_segments = FALSE,
+  Error_bars_or_confidence_intervals = FALSE,
+  Summary_statistic = "Arithmetic mean of within-Author robust z-scores",
+  Individual_variation_displayed = TRUE,
+  Interpretation = paste0(
+    "Circular descriptive summary of an algorithmic partition of a ",
+    "continuous locomotor-exploratory space; not independent evidence ",
+    "of discrete behavioural categories."
+  ),
+  Permitted_use = "Supplementary descriptive visualisation only",
+  Prohibited_use = paste0(
+    "Biological labels; inferential segment comparisons; normative ",
+    "classification; assignment of stressed fish."
+  )
+)
+
+dependency_audit <- tibble::tibble(
+  Dependency = c(
+    "Corrected 006 segmented data",
+    "Corrected 006 integrated membership",
+    "Corrected 006 inference status",
+    "Corrected 006 graph summary",
+    "Corrected 006 dependency audit",
+    "006.0 optimisation results",
+    "006.0 optimisation memberships",
+    "006.1 complete null-model results",
+    "006.1 modularity-test CSV"
+  ),
+  File = required_input_files,
+  MD5 = unname(tools::md5sum(required_input_files)),
+  Modified = as.character(file.info(required_input_files)$mtime)
+)
+
+# ------------------------------------------------------------
+# 13. Export figure, tables and descriptive R objects
+# ------------------------------------------------------------
+
+ggplot2::ggsave(
+  filename = pdf_output,
+  plot = figure_segment_summaries,
+  width = 9,
+  height = 6,
+  units = "in"
+)
+
+ggplot2::ggsave(
+  filename = tiff_output,
+  plot = figure_segment_summaries,
+  width = 9,
+  height = 6,
+  units = "in",
+  dpi = 600,
+  compression = "lzw"
+)
+
+utils::write.csv(descriptive_summary, summary_output, row.names = FALSE)
+utils::write.csv(individual_long, individual_output, row.names = FALSE)
+utils::write.csv(mean_summary_wide, mean_wide_output, row.names = FALSE)
+utils::write.csv(segment_sizes, segment_size_output, row.names = FALSE)
+utils::write.csv(robust_audit, robust_audit_output, row.names = FALSE)
+utils::write.csv(figure_configuration, configuration_output, row.names = FALSE)
+utils::write.csv(dependency_audit, dependency_audit_output, row.names = FALSE)
+
+summary_rds <- file.path(
+  objects_dir,
+  "objective1_louvain_exploratory_segment_summaries.rds"
+)
+
+individual_rds <- file.path(
+  objects_dir,
+  "objective1_louvain_exploratory_segment_summaries_individual.rds"
+)
+
+figure_rds <- file.path(
+  objects_dir,
+  "objective1_figureS_louvain_exploratory_segment_summaries.rds"
+)
+
+configuration_rds <- file.path(
+  objects_dir,
+  "objective1_louvain_exploratory_segment_summaries_configuration.rds"
+)
+
+session_info_file <- file.path(
+  objects_dir,
+  "objective1_louvain_exploratory_segment_summaries_sessionInfo.txt"
+)
+
+saveRDS(descriptive_summary, summary_rds)
+saveRDS(individual_long, individual_rds)
+saveRDS(figure_segment_summaries, figure_rds)
+saveRDS(figure_configuration, configuration_rds)
+capture.output(utils::sessionInfo(), file = session_info_file)
+
+# Deliberately not written:
+# - a validated biological-category object;
+# - a new Louvain model or membership;
+# - inferential comparisons, p values, confidence intervals, or effect sizes
+#   between algorithmic segments;
+# - higher-/lower-exploration or phenotype labels;
+# - any object for assigning stressed fish to segments.
+
+# Historical outputs from the superseded script are neither overwritten
+# nor deleted automatically. If present, they must not be used as current
+# results.
+
+historical_output_files <- c(
+  file.path(figures_dir, "Figure5_ClusterProfiles.pdf"),
+  file.path(figures_dir, "Figure5_ClusterProfiles.tiff"),
+  file.path(tables_dir, "Figure5_ClusterProfiles_Wide.csv"),
+  file.path(tables_dir, "Figure5_ClusterProfiles_Long.csv"),
+  file.path(tables_dir, "Figure5_ClusterProfiles_Summary.csv"),
+  file.path(tables_dir, "Figure5_ClusterProfiles_IndividualLong.csv"),
+  file.path(tables_dir, "Figure5_ClusterSizes.csv"),
+  file.path(tables_dir, "Figure5_ClusterProfiles_Configuration.csv")
+)
+
+existing_historical_outputs <- historical_output_files[
+  file.exists(historical_output_files)
+]
+
+expected_output_files <- c(
+  pdf_output,
+  tiff_output,
+  summary_output,
+  individual_output,
+  mean_wide_output,
+  segment_size_output,
+  robust_audit_output,
+  configuration_output,
+  dependency_audit_output,
+  summary_rds,
+  individual_rds,
+  figure_rds,
+  configuration_rds,
+  session_info_file
+)
+
+output_information <- file.info(expected_output_files)
+
+if (
+  any(!file.exists(expected_output_files)) ||
+    any(is.na(output_information$size)) ||
+    any(output_information$size <= 0)
+) {
+  stop("At least one expected descriptive output is absent or empty.")
+}
+
+# ------------------------------------------------------------
+# 14. Final console audit
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("SCRIPT 007 - EXPLORATORY SEGMENT SUMMARIES\n")
+cat("============================================================\n")
+cat("\nStatus: supplementary descriptive characterisation only.\n")
+cat("Control fish: ", nrow(control_segmented), "\n", sep = "")
+cat("Traceability: Author + ID\n")
+cat("Selected k imported from 006.0/006: ", selected_k, "\n", sep = "")
+cat(
+  "Algorithmic segments: ",
+  selected_number_of_segments,
+  " (",
+  paste(sort(segment_sizes$n), collapse = "/"),
+  ").\n",
+  sep = ""
+)
+cat(
+  "Observed weighted modularity: ",
+  sprintf("%.6f", observed_weighted_modularity),
+  "\n",
+  sep = ""
+)
+cat(
+  "Primary selection-adjusted empirical p: ",
+  sprintf("%.6f", primary_empirical_p),
+  "\n",
+  sep = ""
+)
+cat("Evidence of discrete communities: FALSE\n")
+cat("Inferential comparisons between segments: NONE\n")
+cat(
+  "Interpretation: circular descriptive summary of the exploratory ",
+  "partition of a continuous behavioural space.\n"
+)
+
+cat("\nWithin-Author robust-normalisation audit:\n")
+print(robust_audit, n = Inf, width = Inf)
+
+cat("\nAlgorithmic segment sizes:\n")
+print(segment_sizes, n = Inf, width = Inf)
+
+cat("\nDescriptive variable summaries:\n")
+print(descriptive_summary, n = Inf, width = Inf)
+
+cat(
+  "\nSupplementary figure saved as:\n",
+  normalizePath(pdf_output, winslash = "/", mustWork = TRUE),
+  "\n",
+  normalizePath(tiff_output, winslash = "/", mustWork = TRUE),
+  "\n",
+  sep = ""
+)
+
+if (length(existing_historical_outputs) > 0L) {
+  cat(
+    "\nWARNING: superseded Figure5_ClusterProfiles outputs remain on disk.\n",
+    "They were not modified or deleted and must not be treated as current results:\n",
+    paste(existing_historical_outputs, collapse = "\n"),
+    "\n",
+    sep = ""
+  )
+}
+
+cat("\nAll integrity checks passed.\n")
+cat("============================================================\n")
