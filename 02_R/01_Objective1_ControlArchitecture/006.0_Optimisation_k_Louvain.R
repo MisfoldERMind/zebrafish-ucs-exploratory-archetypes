@@ -33,35 +33,13 @@
 # 1. Project directory
 # ------------------------------------------------------------
 
-base_dir <- normalizePath(
-  ".",
-  winslash = "/",
-  mustWork = TRUE
-)
+base_dir <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
-expected_folders <- c(
-  "01_Data"
-)
-
-missing_folders <- expected_folders[
-  !dir.exists(
-    file.path(
-      base_dir,
-      expected_folders
-    )
-  )
-]
-
-if (length(missing_folders) > 0) {
-  stop(
-    "The script does not appear to be running from the project root.\n",
-    "Expected project folder(s) not found:\n",
-    paste(
-      missing_folders,
-      collapse = ", "
-    )
-  )
+if (!dir.exists(base_dir)) {
+  stop("Project directory not found:\n", base_dir)
 }
+
+setwd(base_dir)
 
 # ------------------------------------------------------------
 # 2. Required packages

@@ -31,14 +31,7 @@
 # 1. Project directory and required packages
 # ------------------------------------------------------------
 
-base_dir <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+base_dir <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(base_dir)) {
   stop("Project directory not found:\n", base_dir)
@@ -1004,3 +997,845 @@ if (length(missing_robust_audit_columns) > 0L) {
     paste(missing_robust_audit_columns, collapse = ", ")
   )
 }
+
+robust_audit_007 <- robust_audit_007 %>%
+  dplyr::transmute(
+    Author = trimws(as.character(Author)),
+    Variable = trimws(as.character(Variable)),
+    n = as.integer(n),
+    Median = as.numeric(Median),
+    Scaled_MAD = as.numeric(Scaled_MAD)
+  ) %>%
+  dplyr::arrange(Author, match(Variable, robust_variables))
+
+if (
+  nrow(robust_audit_007) != nrow(robust_audit) ||
+    anyNA(robust_audit_007) ||
+    any(!is.finite(as.matrix(
+      robust_audit_007[c("Median", "Scaled_MAD")]
+    )))
+) {
+  stop("The 007 within-Author robust-audit CSV is incomplete or non-finite.")
+}
+
+# Compare canonical column vectors rather than entire data-frame objects.
+# read.csv() returns a base data.frame, whereas bind_rows() returns a tibble;
+# identical() on the complete subsets would therefore fail solely because
+# their class attributes differ, even when every stored value is identical.
+robust_audit_keys_identical <-
+  identical(
+    as.character(robust_audit$Author),
+    as.character(robust_audit_007$Author)
+  ) &&
+  identical(
+    as.character(robust_audit$Variable),
+    as.character(robust_audit_007$Variable)
+  ) &&
+  identical(
+    as.integer(robust_audit$n),
+    as.integer(robust_audit_007$n)
+  )
+
+robust_audit_median_difference <- max(
+  abs(robust_audit$Median - robust_audit_007$Median)
+)
+
+robust_audit_mad_difference <- max(
+  abs(robust_audit$Scaled_MAD - robust_audit_007$Scaled_MAD)
+)
+
+if (
+  !robust_audit_keys_identical ||
+    robust_audit_median_difference > 1e-12 ||
+    robust_audit_mad_difference > 1e-12
+) {
+  stop("The within-Author robust audit differs between this script and 007.")
+}
+
+# ------------------------------------------------------------
+# 9. Verify the individual-long object produced by 007
+# ------------------------------------------------------------
+
+required_individual_columns <- c(
+  "Author",
+  "ID",
+  "Traceability_ID",
+  "Algorithmic_Segment",
+  "Robust_Variable",
+  "Variable_Key",
+  "Variable",
+  "Robust_Z_Score"
+)
+
+missing_individual_columns <- setdiff(
+  required_individual_columns,
+  names(individual_long_007)
+)
+
+if (length(missing_individual_columns) > 0L) {
+  stop(
+    "The 007 individual-long RDS lacks:\n",
+    paste(missing_individual_columns, collapse = ", ")
+  )
+}
+
+individual_long_007 <- individual_long_007 %>%
+  dplyr::transmute(
+    Author = trimws(as.character(Author)),
+    ID = trimws(as.character(ID)),
+    Traceability_ID = trimws(as.character(Traceability_ID)),
+    Algorithmic_Segment = normalise_segment_label(
+      Algorithmic_Segment,
+      "individual_long_007"
+    ),
+    Robust_Variable = trimws(as.character(Robust_Variable)),
+    Variable_Key = trimws(as.character(Variable_Key)),
+    Variable = trimws(as.character(Variable)),
+    Robust_Z_Score = as.numeric(Robust_Z_Score)
+  )
+
+if (
+  nrow(individual_long_007) !=
+    expected_number_of_fish * length(robust_variables)
+) {
+  stop("The 007 individual-long object has an incorrect number of rows.")
+}
+
+if (
+  anyNA(individual_long_007) ||
+    any(!is.finite(individual_long_007$Robust_Z_Score))
+) {
+  stop("The 007 individual-long object contains missing or non-finite values.")
+}
+
+if (any(!individual_long_007$Robust_Variable %in% robust_variables)) {
+  stop("The 007 individual-long object contains an unexpected robust variable.")
+}
+
+expected_keys_individual <- make_traceability_key(
+  individual_long_007$Author,
+  individual_long_007$ID
+)
+
+if (!identical(
+  individual_long_007$Traceability_ID,
+  expected_keys_individual
+)) {
+  stop("Stored Author + ID keys are invalid in the 007 individual-long object.")
+}
+
+if (anyDuplicated(individual_long_007[c(
+  "Traceability_ID",
+  "Robust_Variable"
+)]) > 0L) {
+  stop("Duplicated fish-variable rows were detected in the 007 individual object.")
+}
+
+variable_counts_by_fish <- individual_long_007 %>%
+  dplyr::count(Traceability_ID, name = "Number_of_variables")
+
+if (
+  nrow(variable_counts_by_fish) != expected_number_of_fish ||
+    any(variable_counts_by_fish$Number_of_variables != length(robust_variables))
+) {
+  stop("Each fish must have exactly four rows in the 007 individual object.")
+}
+
+if (!setequal(
+  individual_long_007$Traceability_ID,
+  control_segmented$Traceability_ID
+)) {
+  stop("Author + ID keys differ between 006 and the 007 individual object.")
+}
+
+control_row_index <- match(
+  individual_long_007$Traceability_ID,
+  control_segmented$Traceability_ID
+)
+
+if (anyNA(control_row_index)) {
+  stop("The 007 individual object could not be aligned to corrected 006.")
+}
+
+if (!identical(
+  as.character(individual_long_007$Algorithmic_Segment),
+  as.character(control_segmented$Algorithmic_Segment[control_row_index])
+)) {
+  stop("Segment labels differ between corrected 006 and the 007 individual object.")
+}
+
+for (variable_i in robust_variables) {
+  rows_i <- which(individual_long_007$Robust_Variable == variable_i)
+  expected_values_i <- control_segmented[[variable_i]][control_row_index[rows_i]]
+
+  if (!isTRUE(all.equal(
+    individual_long_007$Robust_Z_Score[rows_i],
+    expected_values_i,
+    tolerance = 1e-12
+  ))) {
+    stop("Robust values differ between corrected 006 and 007 for ", variable_i, ".")
+  }
+}
+
+expected_variable_keys <- unname(
+  variable_keys[individual_long_007$Robust_Variable]
+)
+expected_variable_labels <- unname(
+  variable_labels[expected_variable_keys]
+)
+
+if (
+  !identical(individual_long_007$Variable_Key, expected_variable_keys) ||
+    !identical(individual_long_007$Variable, expected_variable_labels)
+) {
+  stop("Behavioural-variable labels are inconsistent in the 007 individual object.")
+}
+
+# ------------------------------------------------------------
+# 10. Recompute and verify the descriptive summary from 007
+# ------------------------------------------------------------
+
+required_summary_columns <- c(
+  "Algorithmic_Segment",
+  "Robust_Variable",
+  "Variable_Key",
+  "Variable",
+  "n",
+  "Mean_Robust_Z_Score",
+  "SD_Robust_Z_Score",
+  "Median_Robust_Z_Score",
+  "Q1_Robust_Z_Score",
+  "Q3_Robust_Z_Score",
+  "IQR_Robust_Z_Score",
+  "Minimum_Robust_Z_Score",
+  "Maximum_Robust_Z_Score"
+)
+
+missing_summary_columns <- setdiff(
+  required_summary_columns,
+  names(descriptive_summary_007)
+)
+
+if (length(missing_summary_columns) > 0L) {
+  stop(
+    "The 007 descriptive-summary RDS lacks:\n",
+    paste(missing_summary_columns, collapse = ", ")
+  )
+}
+
+descriptive_summary_007 <- descriptive_summary_007 %>%
+  dplyr::transmute(
+    Algorithmic_Segment = normalise_segment_label(
+      Algorithmic_Segment,
+      "descriptive_summary_007"
+    ),
+    Robust_Variable = trimws(as.character(Robust_Variable)),
+    Variable_Key = trimws(as.character(Variable_Key)),
+    Variable = trimws(as.character(Variable)),
+    n = as.integer(n),
+    Mean_Robust_Z_Score = as.numeric(Mean_Robust_Z_Score),
+    SD_Robust_Z_Score = as.numeric(SD_Robust_Z_Score),
+    Median_Robust_Z_Score = as.numeric(Median_Robust_Z_Score),
+    Q1_Robust_Z_Score = as.numeric(Q1_Robust_Z_Score),
+    Q3_Robust_Z_Score = as.numeric(Q3_Robust_Z_Score),
+    IQR_Robust_Z_Score = as.numeric(IQR_Robust_Z_Score),
+    Minimum_Robust_Z_Score = as.numeric(Minimum_Robust_Z_Score),
+    Maximum_Robust_Z_Score = as.numeric(Maximum_Robust_Z_Score)
+  ) %>%
+  dplyr::arrange(
+    Algorithmic_Segment,
+    match(Robust_Variable, robust_variables)
+  )
+
+descriptive_summary_recomputed <- individual_long_007 %>%
+  dplyr::group_by(
+    Algorithmic_Segment,
+    Robust_Variable,
+    Variable_Key,
+    Variable
+  ) %>%
+  dplyr::summarise(
+    n = dplyr::n(),
+    Mean_Robust_Z_Score = mean(Robust_Z_Score),
+    SD_Robust_Z_Score = stats::sd(Robust_Z_Score),
+    Median_Robust_Z_Score = stats::median(Robust_Z_Score),
+    Q1_Robust_Z_Score = as.numeric(stats::quantile(
+      Robust_Z_Score,
+      probs = 0.25,
+      names = FALSE
+    )),
+    Q3_Robust_Z_Score = as.numeric(stats::quantile(
+      Robust_Z_Score,
+      probs = 0.75,
+      names = FALSE
+    )),
+    IQR_Robust_Z_Score = stats::IQR(Robust_Z_Score),
+    Minimum_Robust_Z_Score = min(Robust_Z_Score),
+    Maximum_Robust_Z_Score = max(Robust_Z_Score),
+    .groups = "drop"
+  ) %>%
+  dplyr::arrange(
+    Algorithmic_Segment,
+    match(Robust_Variable, robust_variables)
+  )
+
+if (
+  nrow(descriptive_summary_007) !=
+    expected_number_of_segments * length(robust_variables)
+) {
+  stop("The 007 descriptive summary has an incorrect number of rows.")
+}
+
+text_summary_columns <- c(
+  "Algorithmic_Segment",
+  "Robust_Variable",
+  "Variable_Key",
+  "Variable"
+)
+
+if (!identical(
+  lapply(descriptive_summary_007[text_summary_columns], as.character),
+  lapply(descriptive_summary_recomputed[text_summary_columns], as.character)
+)) {
+  stop("The descriptive-summary row identities differ from the recomputation.")
+}
+
+if (!identical(
+  as.integer(descriptive_summary_007$n),
+  as.integer(descriptive_summary_recomputed$n)
+)) {
+  stop("The descriptive-summary sample sizes differ from the recomputation.")
+}
+
+numeric_summary_columns <- setdiff(
+  required_summary_columns,
+  c(text_summary_columns, "n")
+)
+
+for (column_i in numeric_summary_columns) {
+  if (!isTRUE(all.equal(
+    descriptive_summary_007[[column_i]],
+    descriptive_summary_recomputed[[column_i]],
+    tolerance = 1e-12
+  ))) {
+    stop("The 007 descriptive statistic differs after recomputation: ", column_i)
+  }
+}
+
+if (any(!is.finite(as.matrix(
+  descriptive_summary_007[numeric_summary_columns]
+)))) {
+  stop("The 007 descriptive summary contains a non-finite statistic.")
+}
+
+# ------------------------------------------------------------
+# 11. Construct a presentation-ready descriptive table
+# ------------------------------------------------------------
+
+format_mean_sd <- function(mean_value, sd_value) {
+  sprintf("%.3f (%.3f)", mean_value, sd_value)
+}
+
+format_median_q1_q3 <- function(median_value, q1_value, q3_value) {
+  sprintf("%.3f [%.3f, %.3f]", median_value, q1_value, q3_value)
+}
+
+format_minimum_maximum <- function(minimum_value, maximum_value) {
+  sprintf("%.3f to %.3f", minimum_value, maximum_value)
+}
+
+display_table <- dplyr::bind_rows(lapply(
+  robust_variables,
+  function(variable_i) {
+    row_segment_1 <- descriptive_summary_007[
+      descriptive_summary_007$Robust_Variable == variable_i &
+        as.character(descriptive_summary_007$Algorithmic_Segment) == "Segment 1",
+      ,
+      drop = FALSE
+    ]
+
+    row_segment_2 <- descriptive_summary_007[
+      descriptive_summary_007$Robust_Variable == variable_i &
+        as.character(descriptive_summary_007$Algorithmic_Segment) == "Segment 2",
+      ,
+      drop = FALSE
+    ]
+
+    if (nrow(row_segment_1) != 1L || nrow(row_segment_2) != 1L) {
+      stop("Each variable must have exactly one row per algorithmic segment.")
+    }
+
+    tibble::tibble(
+      Variable = unname(variable_labels[[variable_keys[[variable_i]]]]),
+      Segment_1_n = row_segment_1$n,
+      Segment_1_robust_Z_median_Q1_Q3 = format_median_q1_q3(
+        row_segment_1$Median_Robust_Z_Score,
+        row_segment_1$Q1_Robust_Z_Score,
+        row_segment_1$Q3_Robust_Z_Score
+      ),
+      Segment_1_robust_Z_mean_SD = format_mean_sd(
+        row_segment_1$Mean_Robust_Z_Score,
+        row_segment_1$SD_Robust_Z_Score
+      ),
+      Segment_1_robust_Z_minimum_maximum = format_minimum_maximum(
+        row_segment_1$Minimum_Robust_Z_Score,
+        row_segment_1$Maximum_Robust_Z_Score
+      ),
+      Segment_2_n = row_segment_2$n,
+      Segment_2_robust_Z_median_Q1_Q3 = format_median_q1_q3(
+        row_segment_2$Median_Robust_Z_Score,
+        row_segment_2$Q1_Robust_Z_Score,
+        row_segment_2$Q3_Robust_Z_Score
+      ),
+      Segment_2_robust_Z_mean_SD = format_mean_sd(
+        row_segment_2$Mean_Robust_Z_Score,
+        row_segment_2$SD_Robust_Z_Score
+      ),
+      Segment_2_robust_Z_minimum_maximum = format_minimum_maximum(
+        row_segment_2$Minimum_Robust_Z_Score,
+        row_segment_2$Maximum_Robust_Z_Score
+      )
+    )
+  }
+))
+
+if (nrow(display_table) != length(robust_variables)) {
+  stop("The presentation-ready descriptive table must contain four rows.")
+}
+
+analysis_status <- tibble::tibble(
+  Analysis_status = "Supplementary descriptive characterisation only",
+  Number_of_control_fish = expected_number_of_fish,
+  Traceability_key = "Author + ID",
+  Normalisation = "Within Author: (x - median) / (1.4826 x raw MAD)",
+  Selected_k = selected_k,
+  Number_of_algorithmic_segments = selected_number_of_segments,
+  Segment_sizes = paste(expected_segment_sizes, collapse = "/"),
+  Observed_weighted_modularity = observed_weighted_modularity,
+  Primary_selection_adjusted_empirical_p = primary_empirical_p,
+  Alpha = primary_alpha,
+  Evidence_of_discrete_communities = FALSE,
+  Same_variables_constructed_and_described_partition = TRUE,
+  Inferential_comparisons_between_segments = FALSE,
+  Confidence_intervals_between_segments = FALSE,
+  Effect_sizes_between_segments = FALSE,
+  Manuscript_table_designation = "Not Table 2; supplementary descriptive table",
+  Interpretation = paste0(
+    "Circular descriptive summary of an algorithmic partition of a ",
+    "continuous locomotor-exploratory space; not independent evidence ",
+    "of discrete behavioural categories."
+  ),
+  Permitted_use = "Supplementary descriptive reporting only",
+  Prohibited_use = paste0(
+    "Biological labels; inferential segment comparisons; normative atlas; ",
+    "classification or assignment of stressed fish."
+  )
+)
+
+interpretation_notes <- tibble::tibble(
+  Note = c(
+    paste0(
+      "The primary selection-adjusted modularity test from 006.1 was ",
+      "non-significant (p = ",
+      formatC(primary_empirical_p, format = "f", digits = 6),
+      "); therefore, the observed partition is compatible with an ",
+      "algorithmic segmentation of continuous behavioural variation."
+    ),
+    paste0(
+      "The four variables in this table are the same variables used to ",
+      "construct the partition. The segment-specific summaries are circular ",
+      "descriptions and provide no independent test of group separation."
+    ),
+    paste0(
+      "No Wilcoxon, Kruskal-Wallis, multiple-testing adjustment, confidence ",
+      "interval, rank-biserial correlation or other between-segment ",
+      "inferential statistic is calculated."
+    ),
+    paste0(
+      "Segment 1 and Segment 2 are neutral, arbitrary algorithmic labels. ",
+      "They must not be renamed as higher/lower exploration, resilience, ",
+      "susceptibility, anxiety or any other validated phenotype."
+    ),
+    paste0(
+      "This table is supplementary. It must not be used as manuscript ",
+      "Table 2, a normative atlas or a rule for assigning stressed fish."
+    )
+  )
+)
+
+# ------------------------------------------------------------
+# 12. Define outputs and historical files
+# ------------------------------------------------------------
+
+excel_output <- file.path(
+  tables_dir,
+  "TableS_Louvain_ExploratorySegmentSummaries.xlsx"
+)
+
+display_csv_output <- file.path(
+  tables_dir,
+  "TableS_Louvain_ExploratorySegmentSummaries_Display.csv"
+)
+
+full_summary_csv_output <- file.path(
+  tables_dir,
+  "TableS_Louvain_ExploratorySegmentSummaries_Full.csv"
+)
+
+status_csv_output <- file.path(
+  tables_dir,
+  "TableS_Louvain_ExploratorySegmentSummaries_Status.csv"
+)
+
+notes_csv_output <- file.path(
+  tables_dir,
+  "TableS_Louvain_ExploratorySegmentSummaries_Notes.csv"
+)
+
+dependency_audit_output <- file.path(
+  tables_dir,
+  "TableS_Louvain_ExploratorySegmentSummaries_DependencyAudit.csv"
+)
+
+combined_results_rds <- file.path(
+  objects_dir,
+  "objective1_tableS_louvain_exploratory_segment_summaries.rds"
+)
+
+session_info_file <- file.path(
+  objects_dir,
+  "objective1_tableS_louvain_exploratory_segment_summaries_sessionInfo.txt"
+)
+
+historical_output_files <- c(
+  file.path(tables_dir, "Table2_ClusterStatistics.xlsx"),
+  file.path(tables_dir, "Table2_ClusterSizes.csv"),
+  file.path(tables_dir, "Table2_ClusterDescriptiveStatistics.csv"),
+  file.path(tables_dir, "Table2_WilcoxonRankSum_RankBiserial.csv"),
+  file.path(tables_dir, "Table2_KruskalWallis_EquivalenceAudit.csv"),
+  file.path(tables_dir, "Table2_AnalysisConfiguration.csv"),
+  file.path(tables_dir, "Table2_InterpretationNotes.csv"),
+  file.path(objects_dir, "objective1_cluster_statistics_robust.rds"),
+  file.path(objects_dir, "objective1_cluster_descriptive_statistics_robust.rds"),
+  file.path(objects_dir, "objective1_cluster_wilcoxon_results_robust.rds"),
+  file.path(objects_dir, "objective1_cluster_rank_biserial_effect_sizes_robust.rds"),
+  file.path(objects_dir, "objective1_cluster_statistics_sessionInfo.txt")
+)
+
+existing_historical_outputs <- historical_output_files[
+  file.exists(historical_output_files)
+]
+
+dependency_audit <- tibble::tibble(
+  Dependency = c(
+    "Corrected 006 segmented data",
+    "Corrected 006 integrated membership",
+    "Corrected 006 inference status",
+    "Corrected 006 graph summary",
+    "Corrected 006 dependency audit",
+    "006.0 optimisation results",
+    "006.0 optimisation memberships",
+    "006.1 complete null-model results",
+    "006.1 modularity-test CSV",
+    "007 descriptive summary",
+    "007 individual-long data",
+    "007 configuration",
+    "007 segment sizes",
+    "007 robust-normalisation audit",
+    "007 dependency audit"
+  ),
+  File = required_input_files,
+  MD5 = unname(tools::md5sum(required_input_files)),
+  Modified = as.character(file.info(required_input_files)$mtime)
+)
+
+# ------------------------------------------------------------
+# 13. Export the supplementary workbook and audit objects
+# ------------------------------------------------------------
+
+workbook <- openxlsx::createWorkbook(
+  creator = "LAPCOM UCS Resilience project"
+)
+
+workbook_sheets <- list(
+  Descriptive_table = display_table,
+  Full_descriptive_summary = descriptive_summary_007,
+  Segment_sizes = segment_sizes,
+  RobustZ_audit = robust_audit,
+  Analysis_status = analysis_status,
+  Interpretation_notes = interpretation_notes,
+  Dependency_audit = dependency_audit
+)
+
+header_style <- openxlsx::createStyle(
+  fontName = "Arial",
+  fontSize = 10,
+  textDecoration = "bold",
+  fontColour = "#FFFFFF",
+  fgFill = "#2F6F73",
+  halign = "center",
+  valign = "center",
+  wrapText = TRUE,
+  border = "Bottom",
+  borderColour = "#1F4C4F"
+)
+
+body_style <- openxlsx::createStyle(
+  fontName = "Arial",
+  fontSize = 10,
+  valign = "top"
+)
+
+wrap_style <- openxlsx::createStyle(
+  fontName = "Arial",
+  fontSize = 10,
+  valign = "top",
+  wrapText = TRUE
+)
+
+for (sheet_name_i in names(workbook_sheets)) {
+  sheet_data_i <- workbook_sheets[[sheet_name_i]]
+
+  openxlsx::addWorksheet(
+    workbook,
+    sheetName = sheet_name_i,
+    gridLines = FALSE
+  )
+
+  openxlsx::writeData(
+    workbook,
+    sheet = sheet_name_i,
+    x = sheet_data_i,
+    startRow = 1,
+    startCol = 1,
+    headerStyle = header_style,
+    withFilter = TRUE
+  )
+
+  if (nrow(sheet_data_i) > 0L && ncol(sheet_data_i) > 0L) {
+    openxlsx::addStyle(
+      workbook,
+      sheet = sheet_name_i,
+      style = body_style,
+      rows = 2:(nrow(sheet_data_i) + 1L),
+      cols = seq_len(ncol(sheet_data_i)),
+      gridExpand = TRUE,
+      stack = TRUE
+    )
+  }
+
+  openxlsx::freezePane(
+    workbook,
+    sheet = sheet_name_i,
+    firstActiveRow = 2
+  )
+
+  openxlsx::setColWidths(
+    workbook,
+    sheet = sheet_name_i,
+    cols = seq_len(ncol(sheet_data_i)),
+    widths = "auto"
+  )
+}
+
+openxlsx::setColWidths(
+  workbook,
+  sheet = "Descriptive_table",
+  cols = 1,
+  widths = 24
+)
+
+openxlsx::setColWidths(
+  workbook,
+  sheet = "Descriptive_table",
+  cols = 2:ncol(display_table),
+  widths = 23
+)
+
+openxlsx::setColWidths(
+  workbook,
+  sheet = "Interpretation_notes",
+  cols = 1,
+  widths = 110
+)
+
+openxlsx::addStyle(
+  workbook,
+  sheet = "Interpretation_notes",
+  style = wrap_style,
+  rows = 2:(nrow(interpretation_notes) + 1L),
+  cols = 1,
+  gridExpand = TRUE,
+  stack = TRUE
+)
+
+openxlsx::setColWidths(
+  workbook,
+  sheet = "Analysis_status",
+  cols = seq_len(ncol(analysis_status)),
+  widths = 24
+)
+
+openxlsx::saveWorkbook(
+  workbook,
+  file = excel_output,
+  overwrite = TRUE
+)
+
+utils::write.csv(
+  display_table,
+  file = display_csv_output,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  descriptive_summary_007,
+  file = full_summary_csv_output,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  analysis_status,
+  file = status_csv_output,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  interpretation_notes,
+  file = notes_csv_output,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  dependency_audit,
+  file = dependency_audit_output,
+  row.names = FALSE
+)
+
+combined_results <- list(
+  Status = analysis_status,
+  Notes = interpretation_notes,
+  Display_Table = display_table,
+  Full_Descriptive_Summary = descriptive_summary_007,
+  Segment_Sizes = segment_sizes,
+  Robust_Audit = robust_audit,
+  Dependency_Audit = dependency_audit
+)
+
+saveRDS(combined_results, combined_results_rds)
+
+capture.output(
+  utils::sessionInfo(),
+  file = session_info_file
+)
+
+# Deliberately not written:
+# - Wilcoxon or Kruskal-Wallis comparisons between segments;
+# - adjusted or unadjusted p values between segments;
+# - rank-biserial or other between-segment effect sizes;
+# - confidence intervals or significance codes between segments;
+# - validated biological categories or phenotype labels;
+# - a normative atlas or an object for assigning stressed fish.
+
+# ------------------------------------------------------------
+# 14. Verify outputs and print the final audit
+# ------------------------------------------------------------
+
+expected_output_files <- c(
+  excel_output,
+  display_csv_output,
+  full_summary_csv_output,
+  status_csv_output,
+  notes_csv_output,
+  dependency_audit_output,
+  combined_results_rds,
+  session_info_file
+)
+
+missing_output_files <- expected_output_files[
+  !file.exists(expected_output_files)
+]
+
+if (length(missing_output_files) > 0L) {
+  stop(
+    "The following output files were not created:\n",
+    paste(missing_output_files, collapse = "\n")
+  )
+}
+
+empty_output_files <- expected_output_files[
+  is.na(file.info(expected_output_files)$size) |
+    file.info(expected_output_files)$size <= 0
+]
+
+if (length(empty_output_files) > 0L) {
+  stop(
+    "The following output files are empty:\n",
+    paste(empty_output_files, collapse = "\n")
+  )
+}
+
+cat("\n============================================================\n")
+cat("SCRIPT 008 - SUPPLEMENTARY EXPLORATORY SEGMENT TABLE\n")
+cat("============================================================\n")
+cat("\nStatus: supplementary descriptive characterisation only.\n")
+cat("Control fish: ", nrow(control_segmented), "\n", sep = "")
+cat("Traceability: Author + ID\n")
+cat("Selected k imported from 006.0/006: ", selected_k, "\n", sep = "")
+cat(
+  "Algorithmic segments: ",
+  selected_number_of_segments,
+  " (",
+  paste(sort(segment_sizes$n), collapse = "/"),
+  ").\n",
+  sep = ""
+)
+cat(
+  "Observed weighted modularity: ",
+  sprintf("%.6f", observed_weighted_modularity),
+  "\n",
+  sep = ""
+)
+cat(
+  "Primary selection-adjusted empirical p: ",
+  sprintf("%.6f", primary_empirical_p),
+  "\n",
+  sep = ""
+)
+cat("Evidence of discrete communities: FALSE\n")
+cat("Inferential comparisons between segments: NONE\n")
+cat("Between-segment effect sizes: NONE\n")
+cat("Manuscript designation: supplementary table; NOT Table 2.\n")
+cat(
+  "Interpretation: circular descriptive summary of the exploratory ",
+  "partition of a continuous locomotor-exploratory space.\n"
+)
+
+cat("\nWithin-Author robust-normalisation audit:\n")
+print(robust_audit, n = Inf, width = Inf)
+
+cat("\nAlgorithmic segment sizes:\n")
+print(segment_sizes, n = Inf, width = Inf)
+
+cat("\nSupplementary descriptive table:\n")
+print(display_table, n = Inf, width = Inf)
+
+cat(
+  "\nSupplementary workbook saved as:\n",
+  normalizePath(excel_output, winslash = "/", mustWork = TRUE),
+  "\n",
+  sep = ""
+)
+
+if (length(existing_historical_outputs) > 0L) {
+  cat(
+    "\nWARNING: superseded Table2_ClusterStatistics outputs remain on disk.\n",
+    "They were not modified or deleted and must not be treated as current results:\n",
+    paste(existing_historical_outputs, collapse = "\n"),
+    "\n",
+    sep = ""
+  )
+}
+
+cat("\nAll dependency and integrity checks passed.\n")
+cat("============================================================\n")

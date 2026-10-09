@@ -29,52 +29,13 @@
 # 1. Project directory
 # ------------------------------------------------------------
 
-find_project_root <- function(start_dir = getwd()) {
+base_dir <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
-  current_dir <- normalizePath(
-    start_dir,
-    winslash = "/",
-    mustWork = TRUE
-  )
-
-  repeat {
-
-    if (
-      dir.exists(
-        file.path(
-          current_dir,
-          "01_Data"
-        )
-      )
-    ) {
-      return(current_dir)
-    }
-
-    parent_dir <- dirname(current_dir)
-
-    if (identical(parent_dir, current_dir)) {
-      stop(
-        "Could not locate the project root.\n",
-        "Expected to find a directory containing '01_Data'.\n",
-        "Current working directory:\n",
-        getwd()
-      )
-    }
-
-    current_dir <- parent_dir
-  }
+if (!dir.exists(base_dir)) {
+  stop("Project directory not found:\n", base_dir)
 }
 
-base_dir <- find_project_root()
-
 setwd(base_dir)
-
-cat(
-  "Project root detected:\n",
-  base_dir,
-  "\n",
-  sep = ""
-)
 
 # ------------------------------------------------------------
 # 2. Required packages

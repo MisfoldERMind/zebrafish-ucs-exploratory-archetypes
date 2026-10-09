@@ -15,13 +15,9 @@
 # 1. Project directory
 # ------------------------------------------------------------
 
-base_dir <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
+base_dir <- paste0(
+  "C:/Users/USER/Documents/",
+  "LAPCOM_UCS_Resilience"
 )
 
 if (!dir.exists(base_dir)) {
@@ -1000,4 +996,132 @@ if (
 
 cat(
   "\n============================================================\n"
+)
+
+cat(
+  "FIGURE 3 — COHORT-NORMALISED PCA OF LAPCOM CONTROLS\n"
+)
+
+cat(
+  "============================================================\n"
+)
+
+cat(
+  "\nNumber of control fish: ",
+  nrow(control_normalised),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Number of cohorts retained for traceability: ",
+  observed_cohort_n,
+  "\n",
+  sep = ""
+)
+
+cat(
+  "PCA input dimensions: ",
+  nrow(X_robust),
+  " rows x ",
+  ncol(X_robust),
+  " variables\n",
+  sep = ""
+)
+
+cat(
+  "PCA settings: center = TRUE; scale. = FALSE\n"
+)
+
+cat(
+  "Confidence ellipse: not plotted\n"
+)
+
+cat(
+  "\nControl fish by cohort:\n"
+)
+
+print(
+  cohort_counts,
+  n = Inf,
+  width = Inf
+)
+
+cat(
+  "\nInput-data audit:\n"
+)
+
+print(
+  data_audit,
+  row.names = FALSE
+)
+
+cat(
+  "\nRobust-normalisation parameters by control cohort:\n"
+)
+
+print(
+  as.data.frame(normalisation_parameters),
+  row.names = FALSE
+)
+
+cat(
+  "\nRobust-normalisation audit by control cohort:\n"
+)
+
+print(
+  as.data.frame(normalisation_audit),
+  row.names = FALSE
+)
+
+cat(
+  "\nPCA input audit:\n"
+)
+
+print(
+  pca_input_audit,
+  row.names = FALSE
+)
+
+cat(
+  "\nPCA variance:\n"
+)
+
+print(
+  as.data.frame(pca_variance),
+  row.names = FALSE
+)
+
+cat(
+  "\nPCA loadings:\n"
+)
+
+print(
+  as.data.frame(pca_loadings),
+  row.names = FALSE
+)
+
+cat(
+  "\nFigure saved as:\n",
+  normalizePath(
+    pdf_output,
+    winslash = "/",
+    mustWork = TRUE
+  ),
+  "\n",
+  normalizePath(
+    tiff_output,
+    winslash = "/",
+    mustWork = TRUE
+  ),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "\nAll integrity checks passed.\n"
+)
+
+cat(
+  "============================================================\n"
 )

@@ -27,14 +27,7 @@
 # 1. Project directory and packages
 # ------------------------------------------------------------
 
-base_dir <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+base_dir <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(base_dir)) {
   stop("Project directory not found:\n", base_dir)
@@ -1005,3 +998,728 @@ if (
 }
 
 # ------------------------------------------------------------
+# 10. Construct the continuous behavioural reference
+# ------------------------------------------------------------
+
+score_distribution <- dplyr::bind_rows(lapply(
+  components,
+  function(component_i) {
+    values_i <- pca_scores[[component_i]]
+
+    tibble::tibble(
+      Component = component_i,
+      n = length(values_i),
+      Mean = mean(values_i),
+      SD = stats::sd(values_i),
+      Median = stats::median(values_i),
+      Q1 = as.numeric(stats::quantile(values_i, 0.25, names = FALSE)),
+      Q3 = as.numeric(stats::quantile(values_i, 0.75, names = FALSE)),
+      IQR = stats::IQR(values_i),
+      Minimum = min(values_i),
+      Maximum = max(values_i)
+    )
+  }
+))
+
+if (
+  nrow(score_distribution) != length(components) ||
+    any(score_distribution$n != expected_number_of_fish) ||
+    any(!is.finite(as.matrix(score_distribution[
+      setdiff(names(score_distribution), "Component")
+    ])))
+) {
+  stop("The PCA-score reference distribution is invalid.")
+}
+
+loadings_long <- pca_loadings %>%
+  dplyr::select(Variable, dplyr::all_of(components)) %>%
+  tidyr::pivot_longer(
+    cols = dplyr::all_of(components),
+    names_to = "Component",
+    values_to = "Loading"
+  ) %>%
+  dplyr::mutate(
+    Variable_Code = Variable,
+    Variable = unname(variable_labels[Variable_Code]),
+    Component = factor(Component, levels = components),
+    Variable_Code = factor(Variable_Code, levels = raw_variables)
+  ) %>%
+  dplyr::arrange(Component, Variable_Code) %>%
+  dplyr::mutate(
+    Component = as.character(Component),
+    Variable_Code = as.character(Variable_Code)
+  ) %>%
+  dplyr::select(Component, Variable_Code, Variable, Loading)
+
+if (
+  nrow(loadings_long) != length(components) * length(raw_variables) ||
+    anyNA(loadings_long$Variable) ||
+    any(!is.finite(loadings_long$Loading))
+) {
+  stop("The long-format PCA-loading table is invalid.")
+}
+
+loadings_wide <- loadings_long %>%
+  dplyr::select(Component, Variable_Code, Loading) %>%
+  tidyr::pivot_wider(
+    names_from = Variable_Code,
+    values_from = Loading,
+    names_prefix = "Loading_"
+  )
+
+continuous_reference_full <- pca_variance %>%
+  dplyr::left_join(loadings_wide, by = "Component") %>%
+  dplyr::left_join(score_distribution, by = "Component") %>%
+  dplyr::mutate(
+    Orientation = "Stored PCA orientation; component signs are arbitrary"
+  ) %>%
+  dplyr::select(
+    Component,
+    Eigenvalue,
+    Percentage_of_variance,
+    Cumulative_percentage,
+    Loading_distance,
+    Loading_crossing,
+    Loading_top_entry,
+    Loading_top_time,
+    n,
+    Mean,
+    SD,
+    Median,
+    Q1,
+    Q3,
+    IQR,
+    Minimum,
+    Maximum,
+    Orientation
+  )
+
+if (
+  nrow(continuous_reference_full) != length(components) ||
+    anyNA(continuous_reference_full)
+) {
+  stop("The continuous PCA reference table is incomplete.")
+}
+
+continuous_reference_display <- continuous_reference_full %>%
+  dplyr::transmute(
+    Component,
+    `Variance explained (%)` = round(Percentage_of_variance, 2),
+    `Cumulative variance (%)` = round(Cumulative_percentage, 2),
+    `Distance loading` = round(Loading_distance, 4),
+    `Line-crossing loading` = round(Loading_crossing, 4),
+    `Upper-entry loading` = round(Loading_top_entry, 4),
+    `Upper-time loading` = round(Loading_top_time, 4),
+    `Control score, median` = round(Median, 4),
+    `Control score, Q1` = round(Q1, 4),
+    `Control score, Q3` = round(Q3, 4)
+  )
+
+# ------------------------------------------------------------
+# 11. Validation, status and interpretation tables
+# ------------------------------------------------------------
+
+validation_table <- tibble::tibble(
+  Check = c(
+    "Control fish",
+    "Author cohorts",
+    "Traceability key",
+    "Within-Author robust medians",
+    "Within-Author scaled MADs",
+    "Maximum robust-z reconstruction difference",
+    "Maximum stored PCA-centre difference",
+    "Maximum stored-loading difference",
+    "Maximum score reconstruction difference",
+    "Maximum retained-model score difference",
+    "Maximum PCA eigenvalue difference",
+    "Maximum PCA percentage difference",
+    "Maximum PCA cumulative-percentage difference",
+    "Maximum rotation orthogonality difference",
+    "Primary selection-adjusted empirical p",
+    "Evidence of discrete communities",
+    "Segment-derived statistics in Table 3"
+  ),
+  Result = c(
+    as.character(expected_number_of_fish),
+    as.character(expected_number_of_authors),
+    "Author + ID",
+    "All approximately zero",
+    "All approximately one",
+    format(maximum_normalisation_reconstruction_difference, scientific = TRUE),
+    format(maximum_pca_centre_difference, scientific = TRUE),
+    format(maximum_loading_difference, scientific = TRUE),
+    format(maximum_score_reconstruction_difference, scientific = TRUE),
+    format(maximum_model_score_difference, scientific = TRUE),
+    format(maximum_eigenvalue_difference, scientific = TRUE),
+    format(maximum_percentage_difference, scientific = TRUE),
+    format(maximum_cumulative_difference, scientific = TRUE),
+    format(orthogonality_difference, scientific = TRUE),
+    sprintf("%.9f", primary_empirical_p),
+    "FALSE",
+    "NONE"
+  )
+)
+
+analysis_status <- tibble::tibble(
+  Parameter = c(
+    "Table designation",
+    "Analytical status",
+    "Number of control fish",
+    "Traceability",
+    "Control cohorts",
+    "Behavioural variables",
+    "Normalisation",
+    "PCA fitting",
+    "Reference dimensionality",
+    "Primary modularity p",
+    "Evidence of discrete communities",
+    "Use of Louvain segments",
+    "Permitted downstream use",
+    "Prohibited downstream use"
+  ),
+  Value = c(
+    "Table 3 - Continuous behavioural reference",
+    "Continuous multivariate reference; no discrete behavioural archetypes",
+    as.character(expected_number_of_fish),
+    "Author + ID",
+    as.character(expected_number_of_authors),
+    paste(unname(variable_labels), collapse = "; "),
+    "Within Author controls: (x - median) / (1.4826 x raw MAD)",
+    "All 89 controls jointly after cohort-wise normalisation; mean centring applied; no additional SD scaling",
+    "Four orthogonal continuous component scores",
+    sprintf("%.9f", primary_empirical_p),
+    "FALSE",
+    "None",
+    "Projection of observations onto fixed PCA axes as continuous scores",
+    "Archetype, cluster, resilience/susceptibility or other categorical assignment"
+  )
+)
+
+projection_specification <- tibble::tibble(
+  Step = c(
+    "1. Traceability",
+    "2. Cohort reference",
+    "3. Robust transformation",
+    "4. PCA mean centring",
+    "5. Continuous projection",
+    "6. Interpretation"
+  ),
+  Specification = c(
+    "Retain Author + ID; Author is a cohort identifier, not a behavioural predictor.",
+    "For each Author and variable, use the median and scaled MAD estimated from that Author's controls.",
+    "Robust z = (raw value - control median) / (1.4826 x control raw MAD).",
+    "Subtract the stored pooled-control PCA centre from the four-variable robust-z row vector.",
+    "PC scores = centred robust-z row vector multiplied by the fixed 4 x 4 PCA rotation.",
+    "Analyse scores continuously. PCA signs are arbitrary and must remain fixed to this stored orientation."
+  )
+)
+
+interpretation_notes <- tibble::tibble(
+  Note = c(
+    paste0(
+      "The selection-adjusted modularity test was not significant ",
+      "(p = ",
+      sprintf("%.6f", primary_empirical_p),
+      "); therefore no discrete control archetypes are estimated."
+    ),
+    paste0(
+      "Table 3 reports the continuous PCA architecture: explained variance, ",
+      "variable loadings and descriptive control-score distributions."
+    ),
+    paste0(
+      "Component signs are mathematically arbitrary. The stored orientation ",
+      "is frozen only to ensure reproducible projection and interpretation."
+    ),
+    paste0(
+      "The control-score quartiles are descriptive reference summaries, not ",
+      "diagnostic thresholds or categories."
+    ),
+    paste0(
+      "No Louvain membership, segment centroid, nearest-centroid rule, ",
+      "inferential segment comparison or stressed-fish classification is used."
+    )
+  )
+)
+
+# ------------------------------------------------------------
+# 12. Output paths and historical outputs
+# ------------------------------------------------------------
+
+excel_output <- file.path(
+  tables_dir,
+  "Table3_ContinuousBehaviouralReference.xlsx"
+)
+
+display_csv_output <- file.path(
+  tables_dir,
+  "Table3_ContinuousBehaviouralReference_Display.csv"
+)
+
+full_csv_output <- file.path(
+  tables_dir,
+  "Table3_ContinuousBehaviouralReference_Full.csv"
+)
+
+loadings_csv_output <- file.path(
+  tables_dir,
+  "Table3_ContinuousBehaviouralReference_LoadingsLong.csv"
+)
+
+score_distribution_csv_output <- file.path(
+  tables_dir,
+  "Table3_ContinuousBehaviouralReference_ScoreDistribution.csv"
+)
+
+normalisation_csv_output <- file.path(
+  tables_dir,
+  "Table3_ContinuousBehaviouralReference_CohortNormalisation.csv"
+)
+
+validation_csv_output <- file.path(
+  tables_dir,
+  "Table3_ContinuousBehaviouralReference_Validation.csv"
+)
+
+status_csv_output <- file.path(
+  tables_dir,
+  "Table3_ContinuousBehaviouralReference_Status.csv"
+)
+
+notes_csv_output <- file.path(
+  tables_dir,
+  "Table3_ContinuousBehaviouralReference_Notes.csv"
+)
+
+dependency_audit_output <- file.path(
+  tables_dir,
+  "Table3_ContinuousBehaviouralReference_DependencyAudit.csv"
+)
+
+continuous_reference_rds <- file.path(
+  objects_dir,
+  "objective1_continuous_behavioural_reference.rds"
+)
+
+session_info_file <- file.path(
+  objects_dir,
+  "objective1_continuous_behavioural_reference_sessionInfo.txt"
+)
+
+historical_output_files <- c(
+  file.path(tables_dir, "Table3_ArchetypeCentroids.xlsx"),
+  file.path(tables_dir, "Table3_ArchetypeCentroids.csv"),
+  file.path(tables_dir, "Table3_ArchetypeCentroids_Long.csv"),
+  file.path(tables_dir, "Table3_ArchetypeClusterSizes.csv"),
+  file.path(tables_dir, "Table3_ArchetypeCentroids_Audit.csv"),
+  file.path(tables_dir, "Table3_ArchetypeCentroids_Configuration.csv"),
+  file.path(objects_dir, "control_archetype_centroids.rds"),
+  file.path(objects_dir, "objective1_control_archetype_centroids_long_robust.rds"),
+  file.path(objects_dir, "objective1_control_archetype_centroids_audit_robust.rds")
+)
+
+existing_historical_outputs <- historical_output_files[
+  file.exists(historical_output_files)
+]
+
+historical_md5_before <- if (length(existing_historical_outputs) > 0L) {
+  tools::md5sum(existing_historical_outputs)
+} else {
+  character(0)
+}
+
+dependency_audit <- tibble::tibble(
+  Dependency = c(
+    "005 robust control data",
+    "005 PCA model",
+    "005 PCA scores",
+    "005 PCA loadings",
+    "005 PCA variance",
+    "Corrected 006 inference status",
+    "006.1 complete null-model results",
+    "006.1 modularity-test CSV",
+    "Corrected 006 dependency audit"
+  ),
+  File = required_input_files,
+  MD5 = unname(tools::md5sum(required_input_files)),
+  Modified = as.character(file.info(required_input_files)$mtime)
+)
+
+# ------------------------------------------------------------
+# 13. Export workbook, CSV tables and continuous reference RDS
+# ------------------------------------------------------------
+
+workbook <- openxlsx::createWorkbook(
+  creator = "LAPCOM UCS Resilience project"
+)
+
+workbook_sheets <- list(
+  Continuous_reference = continuous_reference_display,
+  Full_precision = continuous_reference_full,
+  Loadings_long = loadings_long,
+  PCA_centre = pca_centre_table,
+  Score_distribution = score_distribution,
+  Cohort_normalisation = normalisation_parameters,
+  Projection_specification = projection_specification,
+  Analysis_status = analysis_status,
+  Validation = validation_table,
+  Interpretation_notes = interpretation_notes,
+  Dependency_audit = dependency_audit
+)
+
+header_style <- openxlsx::createStyle(
+  fontName = "Arial",
+  fontSize = 10,
+  textDecoration = "bold",
+  fontColour = "#FFFFFF",
+  fgFill = "#2F6F73",
+  halign = "center",
+  valign = "center",
+  wrapText = TRUE,
+  border = "Bottom",
+  borderColour = "#1F4C4F"
+)
+
+body_style <- openxlsx::createStyle(
+  fontName = "Arial",
+  fontSize = 10,
+  valign = "top"
+)
+
+wrap_style <- openxlsx::createStyle(
+  fontName = "Arial",
+  fontSize = 10,
+  valign = "top",
+  wrapText = TRUE
+)
+
+for (sheet_name_i in names(workbook_sheets)) {
+  sheet_data_i <- workbook_sheets[[sheet_name_i]]
+
+  openxlsx::addWorksheet(
+    workbook,
+    sheetName = sheet_name_i,
+    gridLines = FALSE
+  )
+
+  openxlsx::writeData(
+    workbook,
+    sheet = sheet_name_i,
+    x = sheet_data_i,
+    startRow = 1,
+    startCol = 1,
+    headerStyle = header_style,
+    withFilter = TRUE
+  )
+
+  if (nrow(sheet_data_i) > 0L && ncol(sheet_data_i) > 0L) {
+    openxlsx::addStyle(
+      workbook,
+      sheet = sheet_name_i,
+      style = body_style,
+      rows = 2:(nrow(sheet_data_i) + 1L),
+      cols = seq_len(ncol(sheet_data_i)),
+      gridExpand = TRUE,
+      stack = TRUE
+    )
+  }
+
+  openxlsx::freezePane(
+    workbook,
+    sheet = sheet_name_i,
+    firstActiveRow = 2
+  )
+
+  openxlsx::setColWidths(
+    workbook,
+    sheet = sheet_name_i,
+    cols = seq_len(ncol(sheet_data_i)),
+    widths = "auto"
+  )
+}
+
+openxlsx::setColWidths(
+  workbook,
+  sheet = "Continuous_reference",
+  cols = seq_len(ncol(continuous_reference_display)),
+  widths = 19
+)
+
+for (sheet_name_i in c(
+  "Projection_specification",
+  "Analysis_status",
+  "Interpretation_notes"
+)) {
+  sheet_data_i <- workbook_sheets[[sheet_name_i]]
+
+  openxlsx::addStyle(
+    workbook,
+    sheet = sheet_name_i,
+    style = wrap_style,
+    rows = 2:(nrow(sheet_data_i) + 1L),
+    cols = seq_len(ncol(sheet_data_i)),
+    gridExpand = TRUE,
+    stack = TRUE
+  )
+}
+
+openxlsx::setColWidths(
+  workbook,
+  sheet = "Projection_specification",
+  cols = c(1, 2),
+  widths = c(24, 100)
+)
+
+openxlsx::setColWidths(
+  workbook,
+  sheet = "Analysis_status",
+  cols = c(1, 2),
+  widths = c(32, 100)
+)
+
+openxlsx::setColWidths(
+  workbook,
+  sheet = "Interpretation_notes",
+  cols = 1,
+  widths = 110
+)
+
+openxlsx::saveWorkbook(
+  workbook,
+  file = excel_output,
+  overwrite = TRUE
+)
+
+utils::write.csv(
+  continuous_reference_display,
+  file = display_csv_output,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  continuous_reference_full,
+  file = full_csv_output,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  loadings_long,
+  file = loadings_csv_output,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  score_distribution,
+  file = score_distribution_csv_output,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  normalisation_parameters,
+  file = normalisation_csv_output,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  validation_table,
+  file = validation_csv_output,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  analysis_status,
+  file = status_csv_output,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  interpretation_notes,
+  file = notes_csv_output,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  dependency_audit,
+  file = dependency_audit_output,
+  row.names = FALSE
+)
+
+continuous_reference_object <- list(
+  Status = "Continuous PCA reference; no discrete behavioural archetypes",
+  Traceability_Key = "Author + ID",
+  Number_of_Control_Fish = expected_number_of_fish,
+  Number_of_Authors = expected_number_of_authors,
+  Raw_Variables = raw_variables,
+  Robust_Variables = robust_variables,
+  Normalisation_Parameters = normalisation_parameters,
+  PCA_Model = pca_model,
+  PCA_Centre = pca_centre_table,
+  Fixed_Rotation = rotation_matrix,
+  PCA_Variance = pca_variance,
+  PCA_Loadings_Long = loadings_long,
+  Control_Score_Distribution = score_distribution,
+  Continuous_Reference_Table = continuous_reference_full,
+  Projection_Specification = projection_specification,
+  Inference_Status = analysis_status,
+  Primary_Selection_Adjusted_Empirical_P = primary_empirical_p,
+  Evidence_of_Discrete_Communities = FALSE,
+  Segment_Membership_Included = FALSE,
+  Classification_Thresholds_Included = FALSE,
+  Validation = validation_table,
+  Dependency_Audit = dependency_audit
+)
+
+saveRDS(continuous_reference_object, continuous_reference_rds)
+
+capture.output(
+  utils::sessionInfo(),
+  file = session_info_file
+)
+
+# Deliberately not written:
+# - Louvain memberships or segment centroids;
+# - normative archetypes or biological profile labels;
+# - nearest-centroid or other categorical assignment rules;
+# - cut-offs for resilience, susceptibility, anxiety or exploration;
+# - inferential comparisons between algorithmic segments.
+
+# ------------------------------------------------------------
+# 14. Verify exported files and historical-file preservation
+# ------------------------------------------------------------
+
+expected_output_files <- c(
+  excel_output,
+  display_csv_output,
+  full_csv_output,
+  loadings_csv_output,
+  score_distribution_csv_output,
+  normalisation_csv_output,
+  validation_csv_output,
+  status_csv_output,
+  notes_csv_output,
+  dependency_audit_output,
+  continuous_reference_rds,
+  session_info_file
+)
+
+output_information <- file.info(expected_output_files)
+
+if (
+  any(!file.exists(expected_output_files)) ||
+    any(is.na(output_information$size)) ||
+    any(output_information$size <= 0)
+) {
+  stop("At least one expected continuous-reference output is absent or empty.")
+}
+
+expected_sheet_names <- names(workbook_sheets)
+observed_sheet_names <- openxlsx::getSheetNames(excel_output)
+
+if (!identical(observed_sheet_names, expected_sheet_names)) {
+  stop("The exported workbook does not contain the expected worksheets.")
+}
+
+display_csv_check <- utils::read.csv(
+  display_csv_output,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+if (
+  nrow(display_csv_check) != nrow(continuous_reference_display) ||
+    !identical(names(display_csv_check), names(continuous_reference_display))
+) {
+  stop("The exported display CSV does not match the in-memory table structure.")
+}
+
+continuous_reference_check <- readRDS(continuous_reference_rds)
+
+if (
+  !is.list(continuous_reference_check) ||
+    !identical(
+      as.character(continuous_reference_check$Status),
+      "Continuous PCA reference; no discrete behavioural archetypes"
+    ) ||
+    !identical(
+      as.logical(continuous_reference_check$Evidence_of_Discrete_Communities),
+      FALSE
+    ) ||
+    !identical(
+      as.logical(continuous_reference_check$Segment_Membership_Included),
+      FALSE
+    ) ||
+    !identical(
+      as.logical(continuous_reference_check$Classification_Thresholds_Included),
+      FALSE
+    )
+) {
+  stop("The exported continuous-reference RDS failed its status audit.")
+}
+
+if (length(existing_historical_outputs) > 0L) {
+  historical_md5_after <- tools::md5sum(existing_historical_outputs)
+
+  if (!identical(
+    unname(historical_md5_before),
+    unname(historical_md5_after)
+  )) {
+    stop("At least one historical archetype-centroid output was modified.")
+  }
+}
+
+# ------------------------------------------------------------
+# 15. Final console audit
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("SCRIPT 009 - TABLE 3 CONTINUOUS BEHAVIOURAL REFERENCE\n")
+cat("============================================================\n")
+cat("\nStatus: continuous multivariate reference only.\n")
+cat("Control fish: ", expected_number_of_fish, "\n", sep = "")
+cat("Author cohorts: ", expected_number_of_authors, "\n", sep = "")
+cat("Traceability: Author + ID\n")
+cat("Continuous dimensions: ", length(components), "\n", sep = "")
+cat(
+  "Primary selection-adjusted empirical p: ",
+  sprintf("%.6f", primary_empirical_p),
+  "\n",
+  sep = ""
+)
+cat("Evidence of discrete communities: FALSE\n")
+cat("Louvain segments used in Table 3: NONE\n")
+cat("Archetypes or classification thresholds created: NONE\n")
+
+cat("\nWithin-Author normalisation and reconstruction audit:\n")
+print(normalisation_parameters, n = Inf, width = Inf)
+
+cat("\nTable 3 - continuous behavioural reference:\n")
+print(continuous_reference_display, n = Inf, width = Inf)
+
+cat("\nValidation:\n")
+print(validation_table, n = Inf, width = Inf)
+
+cat(
+  "\nContinuous-reference workbook saved as:\n",
+  normalizePath(excel_output, winslash = "/", mustWork = TRUE),
+  "\n",
+  sep = ""
+)
+
+cat(
+  "Continuous projection reference saved as:\n",
+  normalizePath(continuous_reference_rds, winslash = "/", mustWork = TRUE),
+  "\n",
+  sep = ""
+)
+
+if (length(existing_historical_outputs) > 0L) {
+  cat(
+    "\nWARNING: superseded Table3_ArchetypeCentroids outputs remain on disk.\n",
+    "They were not modified or deleted and must not be treated as current results:\n",
+    paste(existing_historical_outputs, collapse = "\n"),
+    "\n",
+    sep = ""
+  )
+}
+
+cat("\nAll dependency and integrity checks passed.\n")
+cat("============================================================\n")

@@ -32,21 +32,14 @@
 # ------------------------------------------------------------
 # 1. Project and packages
 # ------------------------------------------------------------
-base_dir <- normalizePath(
-  Sys.getenv(
-    "LAPCOM_UCS_PROJECT_ROOT",
-    unset = getwd()
-  ),
-  winslash = "/",
-  mustWork = TRUE
-)
+
+base_dir <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
 
 if (!dir.exists(base_dir)) {
   stop("Project directory not found:\n", base_dir)
 }
 
 setwd(base_dir)
-
 
 required_packages <- c("dplyr", "tidyr", "tibble", "ggplot2")
 
