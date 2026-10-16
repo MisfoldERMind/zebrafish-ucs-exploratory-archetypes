@@ -24,7 +24,11 @@ Reported R package versions:
 | permute | 0.9.10 |
 | irr | 0.85 |
 | rstatix | 1.0.0 |
+| readxl | 1.5.0 |
+| corrplot | 0.95 |
+| cowplot | 1.2.0 |
+| scales | 1.4.0 |
 
-The scripts additionally require `readxl`, `corrplot`, `cowplot` and `scales`. Their exact installed versions should be captured from the definitive analysis computer before archival release.
+These versions were recorded from the definitive analysis computer used for the manuscript workflow.
 
-A lockfile has not yet been committed because the repository should record the environment that generated the final manuscript outputs rather than reconstruct an approximate environment.
+A lockfile has not yet been committed because the repository records the computational environment that generated the final manuscript outputs rather than reconstructing an approximate environment.
