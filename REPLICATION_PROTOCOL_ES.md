@@ -2,7 +2,7 @@
 
 ## 1. Objetivo
 
-Este protocolo permite que dos investigadores reproduzcan de forma independiente los análisis del repositorio privado `zebrafish-ucs-exploratory-archetypes`, utilizando la misma base de datos y el mismo código del manuscrito.
+Este protocolo permite que dos investigadores reproduzcan de forma independiente los análisis del repositorio `zebrafish-ucs-exploratory-archetypes`, utilizando la misma base de datos y el mismo código del manuscrito.
 
 Este procedimiento constituye una **reproducción computacional**: se vuelven a ejecutar los análisis sobre los datos históricos originales. No constituye una repetición experimental del UCS ni una nueva obtención de datos.
 
@@ -14,11 +14,11 @@ Cada replicador debe trabajar en su propio computador o, como mínimo, en una co
 
 El propietario **no debe compartir** su contraseña de GitHub, códigos de autenticación de dos factores, token personal, clave SSH ni códigos de recuperación.
 
-Cada replicador debe usar su propia cuenta de GitHub. El acceso al repositorio privado se concede mediante una invitación como colaborador.
+Cada replicador debe usar su propia cuenta de GitHub. Si la reproducción se realiza mientras el repositorio aún es privado, el acceso debe concederse mediante una invitación como colaborador; una vez que el repositorio sea público, esta invitación deja de ser necesaria.
 
-### Acciones del propietario del repositorio
+### Acciones del propietario del repositorio cuando el repositorio aún es privado
 
-Repetir estos pasos para cada colega:
+Repetir estos pasos para cada colega únicamente si la reproducción se realiza antes de que el repositorio sea público:
 
 1. Abrir `https://github.com/MisfoldERMind/zebrafish-ucs-exploratory-archetypes`.
 2. Hacer clic en **Settings**.
@@ -187,10 +187,10 @@ Abrir `02_R/01_Objective1_ControlArchitecture` y ejecutar, en este orden:
 5. `007_FigureS_ExploratorySegmentSummaries.R`;
 6. `008_TableS_ExploratorySegmentSummaries.R`;
 7. `009_Table3_ContinuousBehaviouralReference.R`;
-8. `010_ClusterStability.R`;
-9. `010_LouvainExploratorySubsamplingStability.R`;
-10. `010.1_Figure1_Objective1_MainPanel_CORRECTED.R`;
-11. `010.2_SupplementaryFigureS1_Objective1.R`.
+8. `010.00_ClusterStability.R`;
+9. `010.01_LouvainExploratorySubsamplingStability.R`;
+10. `010.02_Figure1_Objective1_MainPanel.R`;
+11. `010.03_SupplementaryFigureS1_Objective1.R`.
 
 Control esperado: plateau de equivalencia exacta en `k = 44–46`, `k = 45` para la inferencia de estabilidad y `k = 46` para la proyección posterior de perfiles fijos.
 
@@ -198,7 +198,7 @@ Control esperado: plateau de equivalencia exacta en `k = 44–46`, `k = 45` para
 
 Abrir `02_R/02_Objective2_PopulationReorganization` y ejecutar todos los scripts definitivos desde `011` hasta `020` en orden numérico. Después ejecutar:
 
-`021_Figure2_Main_PCA_Mahalanobis_CORREGIDO_v4.R`
+`021_Figure2_Main_PCA_Mahalanobis.R`
 
 Los scripts `019` y `020` son dependencias obligatorias de `021`.
 
@@ -288,7 +288,7 @@ Este archivo debe contener 89 peces Stress. Los únicos predictores continuos so
 5. Antes de sustituir el archivo de referencia incluido en la copia descargada, guardarlo fuera de la carpeta de trabajo con el nombre `Objective4_TwoStep_Classification_REFERENCE.xlsx`.
 6. Colocar el archivo recién generado con el nombre y ruta exactos esperados por el script `033`.
 
-Al ejecutar `033_Import_TwoStepClassification_CORREGIDO.R`, R debe confirmar 89 peces, dos clústeres y tamaños 21/68. R no vuelve a calcular Two-Step: importa la pertenencia generada en SPSS, audita la trazabilidad y orienta las clases mediante el Behavioural Index heredado.
+Al ejecutar `033_Import_TwoStepClassification.R`, R debe confirmar 89 peces, dos clústeres y tamaños 21/68. R no vuelve a calcular Two-Step: importa la pertenencia generada en SPSS, audita la trazabilidad y orienta las clases mediante el Behavioural Index heredado.
 
 ## 12. Finalización y registro del entorno
 

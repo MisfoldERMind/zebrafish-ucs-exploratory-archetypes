@@ -27,7 +27,7 @@
 # 1. Project directory and packages
 # ------------------------------------------------------------
 
-base_dir <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
+base_dir <- Sys.getenv("LAPCOM_UCS_PROJECT_ROOT", unset = getwd())
 
 if (!dir.exists(base_dir)) {
   stop("Project directory not found:\n", base_dir)

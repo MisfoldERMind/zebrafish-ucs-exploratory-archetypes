@@ -36,7 +36,7 @@
 # 1. Project directory
 # ------------------------------------------------------------
 
-project_root <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
+project_root <- Sys.getenv("LAPCOM_UCS_PROJECT_ROOT", unset = getwd())
 
 if (!dir.exists(project_root)) {
   stop(
