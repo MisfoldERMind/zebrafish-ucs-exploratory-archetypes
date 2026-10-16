@@ -42,27 +42,27 @@ Script `000` creates or verifies the directory structure and confirms that the p
 5. `007_FigureS_ExploratorySegmentSummaries.R`
 6. `008_TableS_ExploratorySegmentSummaries.R`
 7. `009_Table3_ContinuousBehaviouralReference.R`
-8. `010_ClusterStability.R`
-9. `010_LouvainExploratorySubsamplingStability.R`
-10. `010.1_Figure1_Objective1_MainPanel_CORRECTED.R`
-11. `010.2_SupplementaryFigureS1_Objective1.R`
+8. `010.00_ClusterStability.R`
+9. `010.01_LouvainExploratorySubsamplingStability.R`
+10. `010.02_Figure1_Objective1_MainPanel.R`
+11. `010.03_SupplementaryFigureS1_Objective1.R`
 
 The exact-equivalence plateau spans `k = 44–46`. The representative `k = 45` configuration is used for null-model and resampling inference. The identical partition at `k = 46` is retained for subsequent fixed-profile projection.
 
 ### 02 — Population-level redistribution following UCS
 
-Run scripts `011` through `020` in numerical order, followed by `021_Figure2_Main_PCA_Mahalanobis_CORREGIDO_v4.R` to assemble the definitive Figure 2. Script `019` reconstructs the inherited Control-derived PC1–PC2 projection, script `020` generates the descriptive 95% normal-theory data ellipses, and script `021` combines the corrected PCA-ellipse and Mahalanobis objects without recalculating inferential statistics.
+Run scripts `011` through `020` in numerical order, followed by `021_Figure2_Main_PCA_Mahalanobis.R` to assemble the definitive Figure 2. Script `019` reconstructs the inherited Control-derived PC1–PC2 projection, script `020` generates the descriptive 95% normal-theory data ellipses, and script `021` combines the corrected PCA-ellipse and Mahalanobis objects without recalculating inferential statistics.
 
 ### 03 — De novo post-UCS organisation
 
-Run scripts `020` through `027` in numerical order, followed by `028_SupplementaryFigureS2_Objective3_v6.R`. The representative UCS graph uses `k = 48`.
+Run scripts `020` through `027` in numerical order, followed by `028_SupplementaryFigureS3.R`. The representative UCS graph uses `k = 48`.
 
 ### 04 — Operational definitions and method comparison
 
 1. Run scripts `027` through `032`.
 2. Open the blind dataset exported by script `032` in IBM SPSS Statistics 27.0.1.
 3. Run `SPSS_TwoStep/Syntax/Objective4_TwoStep_Analysis_CORREGIDO.sps` without additional standardisation.
-4. The validated classification is archived as `SPSS_TwoStep/Exported_Classifications/Objective4_TwoStep_Classification_CORREGIDO.xlsx` and contains 89 fish in clusters of 21 and 68.
+4. The final Two-Step classification is archived as `SPSS_TwoStep/Exported_Classifications/Objective4_TwoStep_Classification_CORREGIDO.xlsx` and contains 89 fish in clusters of 21 and 68.
 5. Run scripts `033` through `035`.
 6. Run scripts `037` through `039`.
 

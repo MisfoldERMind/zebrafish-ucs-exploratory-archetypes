@@ -32,7 +32,7 @@ cat("\nRunning: ", script_version, "\n", sep = "")
 # 0. Project directory, packages, seed, outputs
 # ------------------------------------------------------------
 
-project_root <- "C:/Users/USER/Documents/LAPCOM_UCS_Resilience"
+project_root <- Sys.getenv("LAPCOM_UCS_PROJECT_ROOT", unset = getwd())
 
 if (!dir.exists(project_root)) {
   stop("Project directory not found:\n", project_root)

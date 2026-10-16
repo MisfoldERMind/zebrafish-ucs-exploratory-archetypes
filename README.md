@@ -55,7 +55,7 @@ A continuous Behavioural Index is used as a directional score in the complete fo
 │   ├── 01_Objective1_ControlArchitecture/
 │   ├── 02_Objective2_PopulationReorganization/
 │   ├── 03_Objective3_StressPhenotypes/
-│   │   └── 04_Objective4_OperationalDefinitionsOfBehaviouralResilience/
+│   └── 04_Objective4_OperationalDefinitionsOfBehaviouralResilience/
 │       └── SPSS_TwoStep/       # Corrected syntax and classification
 ├── 03_Results/                # Recreated tables, figures and objects
 ├── 07_Environment/            # Computational environment records
