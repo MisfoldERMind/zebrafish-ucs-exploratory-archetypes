@@ -55,10 +55,15 @@ A continuous Behavioural Index is used as a directional score in the complete fo
 │   ├── 01_Objective1_ControlArchitecture/
 │   ├── 02_Objective2_PopulationReorganization/
 │   ├── 03_Objective3_StressPhenotypes/
-│   └── 04_Objective4_OperationalDefinitionsOfBehaviouralResilience/\n│       └── SPSS_TwoStep/       # Corrected syntax and classification
+│   │   └── 04_Objective4_OperationalDefinitionsOfBehaviouralResilience/
+│       └── SPSS_TwoStep/       # Corrected syntax and classification
 ├── 03_Results/                # Recreated tables, figures and objects
 ├── 07_Environment/            # Computational environment records
 ├── .gitignore
+├── .zenodo.json               # Zenodo metadata
+├── LICENSE-CODE               # MIT License for source code
+├── LICENSE-DATA               # CC BY 4.0 for data and documentation
+├── REPLICATION_PROTOCOL_ES.md
 └── README.md
 ```
 
@@ -87,8 +92,18 @@ The complete execution order is documented in [02_R/README.md](02_R/README.md), 
 
 A click-by-click protocol for two independent computational reproductions is available in [REPLICATION_PROTOCOL_ES.md](REPLICATION_PROTOCOL_ES.md).
 
-## Reuse and citation
+## Licensing
 
-The manuscript is in preparation. Citation information and a permanent archival identifier will be added when available.
+Source code, including the R analysis scripts and SPSS syntax, is distributed under the MIT License. See [LICENSE-CODE](LICENSE-CODE).
 
-Code is distributed under the repository licence. Data reuse should preserve cohort provenance, treatment labels and the operational—not biological—interpretation of the behavioural archetypes.
+Behavioural data, the data dictionary, documentation, derived non-software outputs and other research materials are distributed under the Creative Commons Attribution 4.0 International License (CC BY 4.0). See [LICENSE-DATA](LICENSE-DATA).
+
+Reuse of the behavioural data should preserve cohort provenance, treatment labels and the operational—not independently biologically validated—interpretation of the resilient-like and susceptible-like behavioural archetypes.
+
+## Citation
+
+This repository supports the manuscript:
+
+> *Unpredictable chronic stress redistributes novelty-evoked exploratory space use and yields method-dependent identification of resilient-like archetypes in zebrafish*
+
+A permanent Zenodo DOI will be added following archival of the first stable release.
