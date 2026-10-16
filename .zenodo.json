@@ -1,0 +1,43 @@
+{
+  "creators": [
+    {
+      "name": "Fuentealba-Villarroel, Francisco",
+      "orcid": "0009-0000-1041-4416"
+    },
+    {
+      "name": "Bastos, Leonardo M.",
+      "orcid": "0000-0001-8538-6405"
+    },
+    {
+      "name": "Gallas-Lopes, Matheus",
+      "orcid": "0000-0001-5375-2335"
+    },
+    {
+      "name": "Herrmann, Ana P.",
+      "orcid": "0000-0002-0330-0741"
+    },
+    {
+      "name": "Zancan, Denize",
+      "orcid": "0000-0002-5079-1686"
+    },
+    {
+      "name": "Piato, Angelo",
+      "orcid": "0000-0001-5109-7306"
+    }
+  ],
+  "title": "Unpredictable chronic stress redistributes novelty-evoked exploratory space use and yields method-dependent identification of resilient-like archetypes in zebrafish",
+  "description": "Reproducible data and computational workflows supporting a retrospective in silico analysis of novelty-evoked exploratory space use in adult zebrafish exposed to unpredictable chronic stress. The repository contains the behavioural dataset, data dictionary, R analysis scripts, computational environment records, SPSS Two-Step materials and individual-level classification outputs used to reconstruct the unstressed behavioural reference architecture, characterise stress-associated population redistribution, examine de novo organisation within the stress-exposed population and compare alternative operational frameworks for identifying resilient-like and susceptible-like behavioural archetypes.",
+  "keywords": [
+    "zebrafish",
+    "Danio rerio",
+    "unpredictable chronic stress",
+    "stress resilience",
+    "behavioural phenotyping",
+    "novel tank test",
+    "individual variability",
+    "reproducible research"
+  ],
+  "upload_type": "software",
+  "access_right": "open",
+  "language": "eng"
+}
